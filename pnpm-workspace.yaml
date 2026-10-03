@@ -1,0 +1,7 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  ssh2: true
+  cpu-features: true
+minimumReleaseAgeExclude:
+  - electron@43.7.7

@@ -1,0 +1,690 @@
+<script lang="ts">
+  import type { DirEntry, HostInput, HostProfile, HostStatus, Project, RememberedFile, SshConfigHost } from '@shared/types'
+  import { onMount } from 'svelte'
+  import BrowseDialog from './components/BrowseDialog.svelte'
+  import EditorTab from './components/EditorTab.svelte'
+  import FileTree from './components/FileTree.svelte'
+  import HostDialog from './components/HostDialog.svelte'
+  import ToolButton from './components/ToolButton.svelte'
+  import { ancestorDirs, buildTree, fileName } from './lib/tree'
+
+  type Tab = {
+    hostId: string
+    path: string
+    text: string
+    dirty: boolean
+  }
+
+  type Selection = { kind: 'host'; hostId: string } | { kind: 'file'; hostId: string; path: string } | null
+
+  let project = $state<Project | null>(null)
+  let hosts = $state<HostProfile[]>([])
+  let sshHosts = $state<SshConfigHost[]>([])
+  let side = $state<'hosts' | 'files'>('hosts')
+  let encryptionAvailable = $state(true)
+  let banner = $state('')
+  let busy = $state(false)
+  let tabs = $state<Tab[]>([])
+  let activeKey = $state<string | null>(null)
+  let selection = $state<Selection>(null)
+  let hostStatus = $state<Record<string, { status: HostStatus; error?: string }>>({})
+  let cursor = $state({ line: 1, column: 1 })
+
+  let hostDialog = $state<null | { mode: 'add' | 'edit'; host: HostProfile | null }>(null)
+  let hostError = $state('')
+
+  let browse = $state<null | { hostId: string; path: string; entries: DirEntry[]; error: string }>(null)
+  let browseRequest = 0
+  let collapsed = $state<RememberedFile[]>([])
+  let dragKey = $state<string | null>(null)
+  let statusEpoch = 0
+
+  const activeTab = $derived(tabs.find((tab) => tabKey(tab.hostId, tab.path) === activeKey) ?? null)
+  const selectedHostId = $derived(selection?.hostId ?? activeTab?.hostId ?? null)
+  const selectedHost = $derived(hosts.find((host) => host.id === selectedHostId) ?? null)
+  const listHost = $derived.by(() => {
+    if (side === 'hosts') {
+      if (selection?.kind !== 'host') return null
+    } else if (!selection) return null
+    const hostId = selection?.hostId
+    if (!hostId) return null
+    return hosts.find((host) => host.id === hostId) ?? null
+  })
+  const fileGroups = $derived.by(() => {
+    if (!project) return []
+    const current = project
+    return hosts
+      .map((host) => ({
+        host,
+        paths: current.files.filter((file) => file.hostId === host.id).map((file) => file.path)
+      }))
+      .filter((group) => group.paths.length > 0)
+  })
+
+  function tabKey(hostId: string, path: string): string {
+    return `${hostId}\0${path}`
+  }
+
+  function message(err: unknown): string {
+    return err instanceof Error ? err.message : String(err)
+  }
+
+  function identity(host: HostProfile, path: string): string {
+    return `${host.displayName}:${path}`
+  }
+
+  function statusOf(hostId: string): HostStatus {
+    return hostStatus[hostId]?.status ?? 'disconnected'
+  }
+
+  function isDirty(hostId: string, path: string): boolean {
+    return tabs.some((tab) => tab.hostId === hostId && tab.path === path && tab.dirty)
+  }
+
+  function hasDirty(): boolean {
+    return tabs.some((tab) => tab.dirty)
+  }
+
+  function setHostStatus(hostId: string, status: HostStatus, error?: string): void {
+    statusEpoch += 1
+    hostStatus = { ...hostStatus, [hostId]: { status, error } }
+  }
+
+  onMount(() => {
+    const stop = window.api.host.onStatus((event) => {
+      setHostStatus(event.hostId, event.status, event.error)
+      if (event.status === 'failed' && event.error) banner = event.error
+    })
+    void window.api.encryptionAvailable().then((ok) => {
+      encryptionAvailable = ok
+    })
+    void (async () => {
+      await refreshStatuses()
+      const picked = selection
+      if (tabs.length === 0) await restoreSession()
+      else if (picked?.kind === 'file' && tabs.some((tab) => tab.hostId === picked.hostId && tab.path === picked.path))
+        activeKey = tabKey(picked.hostId, picked.path)
+      else if (activeTab) selection = { kind: 'file', hostId: activeTab.hostId, path: activeTab.path }
+      await refreshStatuses()
+    })()
+    return stop
+  })
+
+  async function refreshStatuses(): Promise<void> {
+    const epoch = statusEpoch
+    let events: Awaited<ReturnType<typeof window.api.host.statuses>>
+    try {
+      events = await window.api.host.statuses()
+    } catch {
+      return
+    }
+    if (epoch !== statusEpoch) return
+    const next: typeof hostStatus = {}
+    for (const event of events) next[event.hostId] = { status: event.status, error: event.error }
+    hostStatus = next
+  }
+
+  function persistOpenFiles(): void {
+    const files = tabs.map((tab) => ({ hostId: tab.hostId, path: tab.path }))
+    const active = activeTab ? { hostId: activeTab.hostId, path: activeTab.path } : null
+    void window.api.project.setOpenFiles(files, active)
+  }
+
+  function collapsedPaths(hostId: string): string[] {
+    return collapsed.filter((item) => item.hostId === hostId).map((item) => item.path)
+  }
+
+  function persistCollapsed(): void {
+    const rows = collapsed.map((item) => ({ hostId: item.hostId, path: item.path }))
+    void window.api.project.setCollapsed(rows)
+  }
+
+  function setCollapsed(hostId: string, paths: string[]): void {
+    collapsed = [...collapsed.filter((item) => item.hostId !== hostId), ...paths.map((path) => ({ hostId, path }))]
+    persistCollapsed()
+  }
+
+  function revealFile(hostId: string, path: string): void {
+    const ancestors = new Set(ancestorDirs(path))
+    const next = collapsed.filter((item) => item.hostId !== hostId || !ancestors.has(item.path))
+    if (next.length === collapsed.length) return
+    collapsed = next
+    persistCollapsed()
+  }
+
+  async function restoreSession(): Promise<void> {
+    try {
+      const restored = await window.api.project.restore()
+      if (!restored) return
+      hosts = restored.hosts
+      project = restored.project
+      collapsed = restored.collapsed
+      if (!project) return
+      if (project.files.length > 0) side = 'files'
+      await Promise.all(restored.openFiles.map((file) => openRemote(file.hostId, file.path, false, false)))
+      orderTabs(restored.openFiles)
+      const active = restored.activeFile
+      if (active && tabs.some((tab) => tab.hostId === active.hostId && tab.path === active.path)) {
+        focusFile(active.hostId, active.path)
+      }
+    } catch (err) {
+      banner = message(err)
+    }
+  }
+
+  async function newProject(): Promise<void> {
+    if (hasDirty() && !confirm('Discard unsaved edits and create a new project?')) return
+    busy = true
+    banner = ''
+    try {
+      const created = await window.api.project.create()
+      if (!created) return
+      project = created
+      collapsed = []
+      side = 'hosts'
+      tabs = []
+      activeKey = null
+      selection = null
+      await refreshStatuses()
+      persistOpenFiles()
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function openProject(): Promise<void> {
+    if (hasDirty() && !confirm('Discard unsaved edits and open another project?')) return
+    busy = true
+    banner = ''
+    try {
+      const opened = await window.api.project.open()
+      if (!opened) return
+      project = opened.project
+      hosts = opened.hosts
+      collapsed = opened.collapsed
+      side = opened.project.files.length > 0 ? 'files' : 'hosts'
+      tabs = []
+      activeKey = null
+      selection = null
+      await refreshStatuses()
+      persistOpenFiles()
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function saveHost(input: HostInput): Promise<void> {
+    busy = true
+    hostError = ''
+    try {
+      hosts = await window.api.host.save(input)
+      hostDialog = null
+    } catch (err) {
+      hostError = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function beginAddHost(): Promise<void> {
+    try {
+      sshHosts = await window.api.sshHosts()
+    } catch (err) {
+      sshHosts = []
+      banner = message(err)
+    }
+    hostDialog = { mode: 'add', host: null }
+  }
+
+  async function removeSelectedHost(): Promise<void> {
+    if (!listHost) return
+    const hostId = listHost.id
+    const label = listHost.displayName
+    const count = project?.files.filter((file) => file.hostId === hostId).length ?? 0
+    const note = count ? ` This removes ${count} remembered file${count === 1 ? '' : 's'} from the open project.` : ''
+    if (!confirm(`Remove ${label} from settings?${note}`)) return
+    busy = true
+    banner = ''
+    try {
+      const removed = await window.api.host.remove(hostId)
+      hosts = removed.hosts
+      if (removed.project) project = removed.project
+      tabs = tabs.filter((tab) => tab.hostId !== hostId)
+      if (activeKey?.startsWith(`${hostId}\0`)) activeKey = tabs[0] ? tabKey(tabs[0].hostId, tabs[0].path) : null
+      selection = null
+      collapsed = collapsed.filter((item) => item.hostId !== hostId)
+      persistCollapsed()
+      persistOpenFiles()
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function connectSelected(): Promise<void> {
+    if (!listHost) return
+    banner = ''
+    const hostId = listHost.id
+    setHostStatus(hostId, 'connecting')
+    try {
+      await window.api.host.connect(hostId)
+      setHostStatus(hostId, 'connected')
+    } catch (err) {
+      setHostStatus(hostId, 'failed', message(err))
+      banner = message(err)
+    }
+  }
+
+  async function disconnectSelected(): Promise<void> {
+    if (!listHost) return
+    await window.api.host.disconnect(listHost.id)
+  }
+
+  async function openBrowseAt(hostId: string, directory: string): Promise<void> {
+    selection = { kind: 'host', hostId }
+    browse = { hostId, path: directory, entries: [], error: '' }
+    await navigate(directory)
+  }
+
+  async function openBrowseFor(host: HostProfile): Promise<void> {
+    if (!project) {
+      banner = 'Open a project before opening files.'
+      return
+    }
+    const start = host.lastDirectory || host.defaultDirectory || '.'
+    await openBrowseAt(host.id, start)
+  }
+
+  async function openBrowse(): Promise<void> {
+    if (!listHost) return
+    await openBrowseFor(listHost)
+  }
+
+  async function navigate(directory: string): Promise<void> {
+    if (!browse) return
+    const hostId = browse.hostId
+    const request = ++browseRequest
+    busy = true
+    browse = { ...browse, error: '' }
+    try {
+      const result = await window.api.host.list(hostId, directory)
+      if (request !== browseRequest || !browse || browse.hostId !== hostId) return
+      project = result.project
+      hosts = result.hosts
+      browse = { hostId, path: result.path, entries: result.entries, error: '' }
+      setHostStatus(hostId, 'connected')
+      if (result.file) await openRemote(hostId, result.file)
+    } catch (err) {
+      if (request !== browseRequest || !browse || browse.hostId !== hostId) return
+      browse = { ...browse, error: message(err) }
+    } finally {
+      if (request === browseRequest) busy = false
+    }
+  }
+
+  function orderTabs(files: RememberedFile[]): void {
+    const rank = new Map(files.map((file, index) => [tabKey(file.hostId, file.path), index]))
+    tabs = [...tabs].sort(
+      (a, b) => (rank.get(tabKey(a.hostId, a.path)) ?? tabs.length) - (rank.get(tabKey(b.hostId, b.path)) ?? tabs.length)
+    )
+  }
+
+  function moveTab(fromKey: string, toKey: string, after: boolean): void {
+    if (fromKey === toKey) return
+    const next = [...tabs]
+    const fromIndex = next.findIndex((tab) => tabKey(tab.hostId, tab.path) === fromKey)
+    if (fromIndex < 0) return
+    const [moved] = next.splice(fromIndex, 1)
+    let toIndex = next.findIndex((tab) => tabKey(tab.hostId, tab.path) === toKey)
+    if (toIndex < 0 || !moved) return
+    if (after) toIndex += 1
+    next.splice(toIndex, 0, moved)
+    tabs = next
+    persistOpenFiles()
+  }
+
+  function tabDragStart(event: DragEvent, key: string): void {
+    dragKey = key
+    document.body.classList.add('tab-dragging')
+    event.dataTransfer?.setData('text/plain', key)
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  }
+
+  function tabDragOver(event: DragEvent): void {
+    if (!dragKey) return
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+  }
+
+  function tabDrop(event: DragEvent, key: string): void {
+    event.preventDefault()
+    const from = dragKey
+    dragKey = null
+    if (!from) return
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+    moveTab(from, key, event.clientX > rect.left + rect.width / 2)
+  }
+
+  function focusFile(hostId: string, path: string): void {
+    activeKey = tabKey(hostId, path)
+    selection = { kind: 'file', hostId, path }
+  }
+
+  async function openRemote(hostId: string, path: string, rememberOpen = true, focus = true): Promise<void> {
+    const key = tabKey(hostId, path)
+    const existing = tabs.find((tab) => tabKey(tab.hostId, tab.path) === key)
+    if (existing) {
+      browse = null
+      if (focus) focusFile(hostId, path)
+      if (rememberOpen) {
+        revealFile(hostId, path)
+        persistOpenFiles()
+      }
+      return
+    }
+    busy = true
+    banner = ''
+    try {
+      const loaded = await window.api.file.read(hostId, path)
+      setHostStatus(hostId, 'connected')
+      project = await window.api.file.remember(hostId, path)
+      if (!tabs.some((tab) => tabKey(tab.hostId, tab.path) === key)) {
+        tabs = [...tabs, { hostId, path, text: loaded.text, dirty: false }]
+      }
+      browse = null
+      if (focus) {
+        focusFile(hostId, path)
+        side = 'files'
+      }
+      if (rememberOpen) {
+        revealFile(hostId, path)
+        persistOpenFiles()
+      }
+    } catch (err) {
+      const text = message(err)
+      if (browse) browse = { ...browse, error: text }
+      else banner = text
+    } finally {
+      busy = false
+    }
+  }
+
+  function closeTab(hostId: string, path: string): void {
+    const key = tabKey(hostId, path)
+    tabs = tabs.filter((tab) => tabKey(tab.hostId, tab.path) !== key)
+    if (activeKey === key) {
+      const next = tabs[tabs.length - 1]
+      activeKey = next ? tabKey(next.hostId, next.path) : null
+    }
+    persistOpenFiles()
+  }
+
+  async function forgetSelectedFile(): Promise<void> {
+    if (selection?.kind !== 'file') return
+    const { hostId, path } = selection
+    if (isDirty(hostId, path) && !confirm(`Discard unsaved edits in ${fileName(path)} and remove it from the project?`)) return
+    busy = true
+    try {
+      project = await window.api.file.forget(hostId, path)
+      closeTab(hostId, path)
+      selection = { kind: 'host', hostId }
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  function editText(text: string): void {
+    if (!activeTab) return
+    const key = tabKey(activeTab.hostId, activeTab.path)
+    tabs = tabs.map((tab) => (tabKey(tab.hostId, tab.path) === key ? { ...tab, text, dirty: true } : tab))
+  }
+
+  async function saveTab(tab: Tab): Promise<void> {
+    busy = true
+    banner = ''
+    try {
+      await window.api.file.write(tab.hostId, tab.path, tab.text)
+      const key = tabKey(tab.hostId, tab.path)
+      tabs = tabs.map((item) => (tabKey(item.hostId, item.path) === key ? { ...item, dirty: false } : item))
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  async function saveActive(): Promise<void> {
+    if (activeTab) await saveTab(activeTab)
+  }
+</script>
+
+<div class="flex h-full flex-col">
+  {#if banner}
+    <div class="flex items-start justify-between gap-3 border-b border-line bg-tab px-3 py-2 text-sm text-bad">
+      <span>{banner}</span>
+      <button class="btn" onclick={() => (banner = '')}>Dismiss</button>
+    </div>
+  {/if}
+
+  <div class="flex min-h-0 flex-1">
+    {#snippet hostRow(host: HostProfile)}
+      <button
+        class="flex w-full min-w-0 items-center gap-2 px-2 py-0.5 text-left text-sm leading-5 hover:bg-ink {selection?.kind === 'host' &&
+        selection.hostId === host.id
+          ? 'bg-ink text-accent'
+          : ''}"
+        type="button"
+        title="Double-click to open a file"
+        onclick={() => (selection = { kind: 'host', hostId: host.id })}
+        ondblclick={() => void openBrowseFor(host)}
+      >
+        <span
+          class="h-2 w-2 shrink-0 rounded-full {statusOf(host.id) === 'connected'
+            ? 'bg-ok'
+            : statusOf(host.id) === 'connecting'
+              ? 'bg-warn'
+              : statusOf(host.id) === 'failed'
+                ? 'bg-bad'
+                : 'bg-slate-500'}"
+        ></span>
+        <span class="min-w-0 truncate">{host.displayName}</span>
+      </button>
+    {/snippet}
+
+    <aside class="flex w-80 shrink-0 flex-col border-r border-line bg-panel">
+      <div class="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-1">
+        <ToolButton label="New project" icon="new-project" onclick={() => void newProject()} />
+        <ToolButton label="Open project" icon="open-project" onclick={() => void openProject()} />
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
+        <ToolButton label="Add host" icon="add-host" onclick={() => void beginAddHost()} />
+        <ToolButton
+          label="Edit host"
+          icon="edit"
+          disabled={!listHost}
+          onclick={() => listHost && (hostDialog = { mode: 'edit', host: listHost })}
+        />
+        <ToolButton
+          label="Connect"
+          icon="connect"
+          disabled={!listHost || statusOf(listHost.id) === 'connecting' || statusOf(listHost.id) === 'connected'}
+          onclick={() => void connectSelected()}
+        />
+        <ToolButton
+          label="Disconnect"
+          icon="disconnect"
+          disabled={!listHost || statusOf(listHost.id) !== 'connected'}
+          onclick={() => void disconnectSelected()}
+        />
+        <ToolButton label="Open file" icon="open-file" disabled={!project || !listHost || busy} onclick={() => void openBrowse()} />
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
+        <ToolButton label="Remove host" icon="remove-host" disabled={!listHost} onclick={() => void removeSelectedHost()} />
+        <ToolButton label="Remove file" icon="remove-file" disabled={selection?.kind !== 'file'} onclick={() => void forgetSelectedFile()} />
+      </div>
+      <div class="flex border-b border-line">
+        <button
+          class="flex-1 px-2 py-1.5 text-sm {side === 'hosts' ? 'bg-ink text-accent' : 'text-slate-300 hover:bg-ink'}"
+          type="button"
+          onclick={() => (side = 'hosts')}
+        >
+          Hosts
+        </button>
+        <button
+          class="flex-1 border-l border-line px-2 py-1.5 text-sm {side === 'files' ? 'bg-ink text-accent' : 'text-slate-300 hover:bg-ink'}"
+          type="button"
+          onclick={() => (side = 'files')}
+        >
+          Files
+        </button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-auto p-2">
+        {#if side === 'hosts'}
+          {#if hosts.length === 0}
+            <p class="px-2 py-3 text-sm text-slate-400">No hosts yet. Add one, or fill it from SSH config.</p>
+          {:else}
+            {#each hosts as host (host.id)}
+              {@render hostRow(host)}
+            {/each}
+          {/if}
+        {:else if !project}
+          <p class="px-2 py-3 text-sm text-slate-400">Open a project to remember files.</p>
+        {:else if fileGroups.length === 0}
+          <p class="px-2 py-3 text-sm text-slate-400">No files yet.</p>
+        {:else}
+          {#each fileGroups as group (group.host.id)}
+            <section class="mb-3">
+              {@render hostRow(group.host)}
+              <FileTree
+                nodes={buildTree(group.paths)}
+                collapsed={collapsedPaths(group.host.id)}
+                selectedPath={selection?.kind === 'file' && selection.hostId === group.host.id ? selection.path : null}
+                dirty={(path) => isDirty(group.host.id, path)}
+                titleFor={(path) => identity(group.host, path)}
+                onOpen={(path) => void openRemote(group.host.id, path)}
+                onOpenDir={(path) => void openBrowseAt(group.host.id, path)}
+                onCollapsed={(paths) => setCollapsed(group.host.id, paths)}
+              />
+            </section>
+          {/each}
+        {/if}
+      </div>
+    </aside>
+
+    <main class="flex min-w-0 flex-1 flex-col">
+      <div class="flex h-9 shrink-0 items-center gap-0.5 border-b border-line bg-panel px-1">
+        <ToolButton label="Save" icon="save" accent disabled={!activeTab?.dirty || busy} onclick={() => void saveActive()} />
+      </div>
+      <div class="flex gap-1 overflow-auto border-b border-line bg-ink px-2 pt-2" role="list">
+        {#each tabs as tab (tabKey(tab.hostId, tab.path))}
+          {@const host = hosts.find((item) => item.id === tab.hostId)}
+          {@const key = tabKey(tab.hostId, tab.path)}
+          <div
+            class="flex max-w-56 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
+            key
+              ? 'border-line bg-tab-active'
+              : 'border-transparent bg-tab'} {dragKey === key ? 'opacity-40' : ''}"
+            role="listitem"
+            ondragover={tabDragOver}
+            ondrop={(event) => tabDrop(event, key)}
+          >
+            <button
+              class="min-w-0 flex-1 truncate text-left active:cursor-grabbing"
+              draggable="true"
+              ondragstart={(event) => tabDragStart(event, key)}
+              ondragend={() => {
+                dragKey = null
+                document.body.classList.remove('tab-dragging')
+              }}
+              title={host ? identity(host, tab.path) : tab.path}
+              onclick={() => {
+                activeKey = tabKey(tab.hostId, tab.path)
+                selection = { kind: 'file', hostId: tab.hostId, path: tab.path }
+                revealFile(tab.hostId, tab.path)
+              }}
+            >
+              {fileName(tab.path)}
+            </button>
+            {#if tab.dirty}
+              <span class="size-2.5 shrink-0 rounded-full bg-warn" title="Unsaved changes" aria-label="Unsaved changes"></span>
+            {/if}
+            <button
+              class="text-slate-400 hover:text-white"
+              data-close-tab
+              title="Close tab"
+              onclick={() => closeTab(tab.hostId, tab.path)}
+            >×</button>
+          </div>
+        {/each}
+      </div>
+      <div class="min-h-0 flex-1">
+        {#if activeTab}
+          {#key tabKey(activeTab.hostId, activeTab.path)}
+            <EditorTab
+              path={activeTab.path}
+              text={activeTab.text}
+              onChange={editText}
+              onSave={() => void saveActive()}
+              onCursor={(line, column) => (cursor = { line, column })}
+            />
+          {/key}
+        {:else}
+          <div class="flex h-full items-center justify-center text-sm text-slate-500">
+            {project ? 'Open a file from a host.' : 'No project open.'}
+          </div>
+        {/if}
+      </div>
+      <footer class="flex items-center justify-between gap-3 border-t border-line bg-panel px-3 py-1 text-xs text-slate-300">
+        <span class="truncate">
+          {#if activeTab && selectedHost && activeTab.hostId === selectedHost.id}
+            {identity(selectedHost, activeTab.path)}
+          {:else if activeTab}
+            {@const host = hosts.find((item) => item.id === activeTab.hostId)}
+            {host ? identity(host, activeTab.path) : activeTab.path}
+          {:else if selectedHost}
+            {selectedHost.displayName}
+            {statusOf(selectedHost.id)}
+          {/if}
+        </span>
+        <span class="shrink-0">{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
+      </footer>
+    </main>
+  </div>
+</div>
+
+{#if hostDialog}
+  <HostDialog
+    mode={hostDialog.mode}
+    host={hostDialog.host}
+    {encryptionAvailable}
+    {busy}
+    error={hostError}
+    {sshHosts}
+    onBrowseKey={() => window.api.pickKeyFile()}
+    onCancel={() => {
+      hostDialog = null
+      hostError = ''
+    }}
+    onSave={(input) => void saveHost(input)}
+  />
+{/if}
+
+{#if browse}
+  {@const current = browse}
+  {@const host = hosts.find((item) => item.id === current.hostId)}
+  <BrowseDialog
+    hostLabel={host?.displayName ?? 'host'}
+    path={current.path}
+    entries={current.entries}
+    {busy}
+    error={current.error}
+    onNavigate={(path) => void navigate(path)}
+    onOpen={(path) => void openRemote(current.hostId, path)}
+    onClose={() => (browse = null)}
+  />
+{/if}
