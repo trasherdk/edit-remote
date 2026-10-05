@@ -123,14 +123,19 @@
       selected = null
       pendingDir = null
       filter = ''
-      return
+    } else {
+      const { dir, segment } = splitDraft(draft, listed)
+      if (normalize(dir) === normalize(listed)) {
+        pendingDir = null
+        filter = segment
+      }
+      selected = pick(visibleEntries(), segment)
     }
-    const { dir, segment } = splitDraft(draft, listed)
-    if (normalize(dir) === normalize(listed)) {
-      pendingDir = null
-      filter = segment
+    if (!selected) {
+      void tick().then(() => {
+        if (listEl) listEl.scrollTop = 0
+      })
     }
-    selected = pick(visibleEntries(), segment)
   })
 
   $effect(() => {
@@ -153,15 +158,26 @@
     return Math.max(1, Math.floor(list.clientHeight / row.offsetHeight))
   }
 
+  function focusField(): void {
+    const input = pathInput
+    if (!input) return
+    input.focus()
+    const end = input.value.length
+    input.setSelectionRange(end, end)
+  }
+
   function showEntry(entry: DirEntry): void {
     selected = entry
     draft = entry.path
-    void tick().then(() => {
-      const input = pathInput
-      if (!input || document.activeElement !== input) return
-      const end = input.value.length
-      input.setSelectionRange(end, end)
-    })
+    void tick().then(focusField)
+  }
+
+  function enterDir(directory: string): void {
+    draft = directory === '/' ? '/' : `${normalize(directory)}/`
+    owned = true
+    followTyped()
+    syncFilter()
+    void tick().then(focusField)
   }
 
   function move(delta: number): void {
@@ -180,9 +196,7 @@
       onOpen(entry.path)
       return
     }
-    draft = entry.path
-    release()
-    onNavigate(entry.path)
+    enterDir(entry.path)
   }
 
   function onKey(event: KeyboardEvent): void {
@@ -201,6 +215,11 @@
       return
     }
     if (event.key !== 'Enter' || !inField || !selected) return
+    if (selected.kind === 'dir') {
+      event.preventDefault()
+      enterDir(selected.path)
+      return
+    }
     if (normalize(draft.trim()) === normalize(selected.path)) return
     event.preventDefault()
     accept(selected)
@@ -226,6 +245,16 @@
     aria-modal="true"
     aria-labelledby="browse-title"
     onkeydown={onKey}
+    onmousedown={(event) => {
+      const target = event.target
+      if (target instanceof Element && target.closest('button')) event.preventDefault()
+    }}
+    onfocusout={(event) => {
+      const next = event.relatedTarget
+      if (!(next instanceof Node) || !event.currentTarget.contains(next)) return
+      if (next instanceof HTMLInputElement) return
+      focusField()
+    }}
   >
     <div class="mb-2 flex items-center justify-between gap-3">
       <h2 id="browse-title" class="truncate text-sm font-normal">Open on {hostLabel}</h2>
@@ -265,15 +294,8 @@
                   : ''}"
                 type="button"
                 data-path={entry.path}
-                ondblclick={() => (entry.kind === 'dir' ? onNavigate(entry.path) : onOpen(entry.path))}
-                onclick={() => {
-                  if (entry.kind === 'dir') {
-                    release()
-                    onNavigate(entry.path)
-                    return
-                  }
-                  showEntry(entry)
-                }}
+                ondblclick={() => (entry.kind === 'dir' ? enterDir(entry.path) : onOpen(entry.path))}
+                onclick={() => (entry.kind === 'dir' ? enterDir(entry.path) : showEntry(entry))}
               >
                 <span class="w-6 shrink-0 text-xs font-normal leading-5 text-slate-500">{entry.kind === 'dir' ? 'dir' : ''}</span>
                 <span class="min-w-0 truncate text-sm font-normal leading-5">{entry.name}</span>
