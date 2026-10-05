@@ -15,6 +15,7 @@ asarUnpack:
   - '**/*.node'
 win:
   executableName: edit-remote
+  icon: build/icon.png
   verifyUpdateCodeSignature: false
   target:
     - nsis
@@ -31,6 +32,7 @@ nsis:
 portable:
   artifactName: ${name}-${version}-portable.${ext}
 linux:
+  icon: build/icon.png
   category: Network
   maintainer: fumlersoft
   target:
