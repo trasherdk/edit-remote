@@ -17,6 +17,7 @@ type SessionFile = {
   activeFile?: RememberedFile | null
   bounds?: { x: number; y: number; width: number; height: number }
   trees?: StoredTree[]
+  updateDownloadDir?: string
 }
 
 type StoredProject = {
@@ -82,7 +83,8 @@ async function readSession(): Promise<SessionFile> {
       openFiles: uniqueOpenFiles,
       activeFile,
       bounds,
-      trees
+      trees,
+      updateDownloadDir: typeof parsed.updateDownloadDir === 'string' ? parsed.updateDownloadDir : undefined
     }
   } catch {
     return {}
@@ -106,6 +108,14 @@ function updateSession(change: (prev: SessionFile) => SessionFile): Promise<void
     () => undefined
   )
   return run
+}
+
+export async function getUpdateDownloadDir(): Promise<string> {
+  return (await readSession()).updateDownloadDir ?? ''
+}
+
+export async function setUpdateDownloadDir(dir: string): Promise<void> {
+  await updateSession((prev) => ({ ...prev, updateDownloadDir: dir }))
 }
 
 async function rememberLastProject(filePath: string, keepOpenFiles: boolean): Promise<void> {

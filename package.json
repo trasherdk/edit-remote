@@ -1,14 +1,27 @@
 {
   "name": "edit-remote",
-  "version": "0.1.0",
+  "version": "0.1.1-beta.1",
   "private": true,
   "description": "Edit files over SFTP, one host per file",
   "main": "./out/main/index.js",
+  "author": "TrasherDK",
+  "homepage": "https://github.com/trasherdk/edit-remote",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trasherdk/edit-remote.git"
+  },
   "packageManager": "pnpm@12.4.2",
   "scripts": {
-    "postinstall": "node ./node_modules/electron/install.js",
+    "postinstall": "node ./node_modules/electron/install.js && electron-builder install-app-deps",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:unpack": "pnpm run build && electron-builder --dir",
+    "build:win": "pnpm run build && electron-builder --win",
+    "build:linux": "pnpm run build && electron-builder --linux",
+    "release": "node scripts/release.mjs",
+    "release:patch": "node scripts/release.mjs --bump patch",
+    "release:minor": "node scripts/release.mjs --bump minor",
+    "release:major": "node scripts/release.mjs --bump major",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck": "pnpm run typecheck:node && svelte-check --tsconfig ./tsconfig.web.json"
   },
@@ -31,6 +44,7 @@
     "@types/ssh2": "^1.15.5",
     "codemirror": "^6.0.2",
     "electron": "^43.7.7",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",

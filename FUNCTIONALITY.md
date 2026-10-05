@@ -233,3 +233,18 @@ Settled for now: the side panel is one named project, written when a host or a r
 - **41. Single window.** Multiple windows multiply which host is connected where, and which pair is being compared. *Lean: one window, one compare at a time.*
 - **42. Logging.** Connection and listing failures are painful to diagnose without a protocol log. *Lean: a per-host log the user can open, with passwords redacted.*
 - **43. Stack.** Preferred stack is recorded above: Electron, Svelte 5, CodeMirror 6, `ssh2`, `basic-ftp`, JSON project file, `safeStorage` for secrets. No git, OpenSSH, or openssl binary. Still worth a check once a host connects for real: `ssh2` host-key prompt, and `basic-ftp` explicit FTPS against a server that is not pure SFTP.
+
+## Release
+
+Ship from a clean `develop` that matches `origin/develop`. `master` is the release branch.
+
+```bash
+pnpm release
+pnpm release:patch
+pnpm release:minor
+pnpm release:major
+pnpm release:patch -- beta
+pnpm release -- rc
+```
+
+`pnpm release:patch`, `release:minor`, and `release:major` move the version numbers. With `beta` or `rc`, that new version starts at `vX.Y.Z-beta.1` or `vX.Y.Z-rc.1`. Repeating `pnpm release -- beta` (or `rc`) on that same version increments the number (`beta.2`, `rc.2`). `pnpm release` with no channel then tags the stable `vX.Y.Z`. The script merges `develop` into `master`, fast-forwards `develop` to that commit, and pushes the tag. GitHub Actions publishes the GitHub Release with Windows (NSIS setup and portable) and Linux (AppImage and .deb) binaries, then writes notes from commits since the previous tag. Stable notes skip prerelease tags. `beta` and `rc` tags are GitHub prereleases, so they stay off the stable update check. Do not create that GitHub Release locally. Packaged builds check the latest published stable release on startup, and when the version in the status bar is clicked. A packaged beta is offered that stable release when it exists.

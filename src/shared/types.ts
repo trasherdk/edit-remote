@@ -83,6 +83,10 @@ export type HostStatusEvent = {
 
 export type EditRemoteApi = {
   encryptionAvailable: () => Promise<boolean>
+  app: {
+    version: () => Promise<string>
+    checkForUpdates: () => Promise<void>
+  }
   project: {
     create: () => Promise<Project | null>
     open: () => Promise<{ project: Project; hosts: HostProfile[]; collapsed: RememberedFile[] } | null>

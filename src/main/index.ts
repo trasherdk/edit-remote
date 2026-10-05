@@ -20,6 +20,7 @@ import { readSshConfig } from './ssh-config'
 import { bindConfigWindow } from './config-home'
 import { encryptionAvailable } from './secrets'
 import { bindSessionEvents, connectHost, connectionStatuses, disconnectAll, disconnectHost, listRemote, readRemote, writeRemote } from './sftp'
+import { checkForUpdates, startAutoUpdate } from './updater'
 
 let mainWindow: BrowserWindow | null = null
 
@@ -190,6 +191,9 @@ function registerIpc(): void {
   )
   ipcMain.handle('file:remember', (_event, hostId: string, path: string) => wrap(() => rememberFile(hostId, path)))
   ipcMain.handle('file:forget', (_event, hostId: string, path: string) => wrap(() => forgetFile(hostId, path)))
+
+  ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:checkForUpdates', () => wrap(() => checkForUpdates(true)))
 }
 
 bindConfigWindow(() => mainWindow)
@@ -201,6 +205,7 @@ bindSessionEvents(
 
 app.whenReady().then(() => {
   registerIpc()
+  startAutoUpdate(() => mainWindow)
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

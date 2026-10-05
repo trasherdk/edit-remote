@@ -37,6 +37,7 @@
   let browseRequest = 0
   let collapsed = $state<RememberedFile[]>([])
   let dragKey = $state<string | null>(null)
+  let appVersion = $state('')
   let statusEpoch = 0
 
   const activeTab = $derived(tabs.find((tab) => tabKey(tab.hostId, tab.path) === activeKey) ?? null)
@@ -97,6 +98,9 @@
     })
     void window.api.encryptionAvailable().then((ok) => {
       encryptionAvailable = ok
+    })
+    void window.api.app.version().then((value) => {
+      appVersion = value
     })
     void (async () => {
       await refreshStatuses()
@@ -651,7 +655,12 @@
             {statusOf(selectedHost.id)}
           {/if}
         </span>
-        <span class="shrink-0">{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
+        <span class="flex shrink-0 items-center gap-3">
+          <span>{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
+          <button class="hover:text-white" title="Check for updates" onclick={() => void window.api.app.checkForUpdates()}>
+            {appVersion}
+          </button>
+        </span>
       </footer>
     </main>
   </div>

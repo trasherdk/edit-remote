@@ -3,6 +3,10 @@ import type { EditRemoteApi, HostInput, HostStatusEvent, ListResult, Project, Re
 
 const api: EditRemoteApi = {
   encryptionAvailable: () => ipcRenderer.invoke('app:encryptionAvailable'),
+  app: {
+    version: () => ipcRenderer.invoke('app:version'),
+    checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates')
+  },
   project: {
     create: () => ipcRenderer.invoke('project:create'),
     open: () => ipcRenderer.invoke('project:open'),
