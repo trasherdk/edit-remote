@@ -8,23 +8,27 @@
   import { basicSetup } from 'codemirror'
   import { onMount } from 'svelte'
   import { languageFor } from '../lib/languages'
-  import { fileName } from '../lib/tree'
+import { fileName } from '../lib/tree'
 
-  let {
+let {
     path,
     text,
+    active,
     onChange,
     onSave,
     onCursor
   }: {
     path: string
     text: string
+    active: boolean
     onChange: (text: string) => void
     onSave: () => void
     onCursor: (line: number, column: number) => void
   } = $props()
 
   let hostEl: HTMLDivElement | undefined = $state()
+  let shown = $state(0)
+  let view: EditorView | undefined
   const hooks: {
     onChange: (text: string) => void
     onSave: () => void
@@ -41,10 +45,24 @@
     hooks.onCursor = onCursor
   })
 
+  function reportCursor(current: EditorView): void {
+    const pos = current.state.selection.main.head
+    const line = current.state.doc.lineAt(pos)
+    hooks.onCursor(line.number, pos - line.from + 1)
+  }
+
+  $effect(() => {
+    if (!active || shown === 0) return
+    const current = view
+    if (!current) return
+    current.focus()
+    reportCursor(current)
+  })
+
   onMount(() => {
     const parent = hostEl
     if (!parent) return
-    const view = new EditorView({
+    view = new EditorView({
       parent,
       state: EditorState.create({
         doc: text,
@@ -88,18 +106,19 @@
         ]
       })
     })
-    const line = view.state.doc.lineAt(view.state.selection.main.head)
-    hooks.onCursor(line.number, view.state.selection.main.head - line.from + 1)
+    reportCursor(view)
+    shown += 1
     let alive = true
     const match = languageFor(fileName(path), text)
     if (match) {
       void match.load().then((support) => {
-        if (alive) view.dispatch({ effects: StateEffect.appendConfig.of(support) })
+        if (alive) view?.dispatch({ effects: StateEffect.appendConfig.of(support) })
       })
     }
     return () => {
       alive = false
-      view.destroy()
+      view?.destroy()
+      view = undefined
     }
   })
 </script>

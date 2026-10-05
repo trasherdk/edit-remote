@@ -199,7 +199,12 @@ function registerIpc(): void {
   ipcMain.handle('file:remember', (_event, hostId: string, path: string) => wrap(() => rememberFile(hostId, path)))
   ipcMain.handle('file:forget', (_event, hostId: string, path: string) => wrap(() => forgetFile(hostId, path)))
 
-  ipcMain.handle('app:version', () => app.getVersion())
+  ipcMain.handle('app:version', () => {
+    const version = app.getVersion()
+    if (!app.isPackaged) return `${version} dev`
+    if (process.env.PORTABLE_EXECUTABLE_DIR) return `${version} portable`
+    return version
+  })
   ipcMain.handle('app:checkForUpdates', () => wrap(() => checkForUpdates(true)))
 }
 

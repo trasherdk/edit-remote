@@ -26,6 +26,7 @@
   let busy = $state(false)
   let tabs = $state<Tab[]>([])
   let activeKey = $state<string | null>(null)
+  let recentKey = $state<string | null>(null)
   let selection = $state<Selection>(null)
   let hostStatus = $state<Record<string, { status: HostStatus; error?: string }>>({})
   let cursor = $state({ line: 1, column: 1 })
@@ -111,7 +112,24 @@
       else if (activeTab) selection = { kind: 'file', hostId: activeTab.hostId, path: activeTab.path }
       await refreshStatuses()
     })()
-    return stop
+    const onKey = (event: KeyboardEvent) => {
+      if (browse || hostDialog) return
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === 'Tab') {
+        event.preventDefault()
+        if (!event.repeat) toggleRecentTab()
+        return
+      }
+      const digit = /^Digit([1-9])$/.exec(event.code)
+      if (digit && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault()
+        if (!event.repeat) showTabAt(Number(digit[1]) - 1)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      stop()
+      window.removeEventListener('keydown', onKey, true)
+    }
   })
 
   async function refreshStatuses(): Promise<void> {
@@ -375,8 +393,30 @@
   }
 
   function focusFile(hostId: string, path: string): void {
-    activeKey = tabKey(hostId, path)
+    const key = tabKey(hostId, path)
+    if (activeKey && activeKey !== key) recentKey = activeKey
+    activeKey = key
     selection = { kind: 'file', hostId, path }
+  }
+
+  function showTab(hostId: string, path: string): void {
+    focusFile(hostId, path)
+    revealFile(hostId, path)
+  }
+
+  function showTabAt(index: number): void {
+    const tab = tabs[index]
+    if (tab) showTab(tab.hostId, tab.path)
+  }
+
+  function toggleRecentTab(): void {
+    if (!recentKey || recentKey === activeKey) return
+    const tab = tabs.find((item) => tabKey(item.hostId, item.path) === recentKey)
+    if (!tab) {
+      recentKey = null
+      return
+    }
+    showTab(tab.hostId, tab.path)
   }
 
   async function openRemote(hostId: string, path: string, rememberOpen = true, focus = true): Promise<void> {
@@ -421,6 +461,7 @@
   function closeTab(hostId: string, path: string): void {
     const key = tabKey(hostId, path)
     tabs = tabs.filter((tab) => tabKey(tab.hostId, tab.path) !== key)
+    if (recentKey === key) recentKey = null
     if (activeKey === key) {
       const next = tabs[tabs.length - 1]
       activeKey = next ? tabKey(next.hostId, next.path) : null
@@ -444,9 +485,8 @@
     }
   }
 
-  function editText(text: string): void {
-    if (!activeTab) return
-    const key = tabKey(activeTab.hostId, activeTab.path)
+  function editText(hostId: string, path: string, text: string): void {
+    const key = tabKey(hostId, path)
     tabs = tabs.map((tab) => (tabKey(tab.hostId, tab.path) === key ? { ...tab, text, dirty: true } : tab))
   }
 
@@ -606,11 +646,7 @@
                 document.body.classList.remove('tab-dragging')
               }}
               title={host ? identity(host, tab.path) : tab.path}
-              onclick={() => {
-                activeKey = tabKey(tab.hostId, tab.path)
-                selection = { kind: 'file', hostId: tab.hostId, path: tab.path }
-                revealFile(tab.hostId, tab.path)
-              }}
+              onclick={() => showTab(tab.hostId, tab.path)}
             >
               {fileName(tab.path)}
             </button>
@@ -626,18 +662,23 @@
           </div>
         {/each}
       </div>
-      <div class="min-h-0 flex-1">
-        {#if activeTab}
-          {#key tabKey(activeTab.hostId, activeTab.path)}
+      <div class="relative min-h-0 flex-1">
+        {#each tabs as tab (tabKey(tab.hostId, tab.path))}
+          {@const key = tabKey(tab.hostId, tab.path)}
+          <div class="absolute inset-0 {key === activeKey ? 'z-10' : 'invisible pointer-events-none'}">
             <EditorTab
-              path={activeTab.path}
-              text={activeTab.text}
-              onChange={editText}
+              path={tab.path}
+              text={tab.text}
+              active={key === activeKey}
+              onChange={(text) => editText(tab.hostId, tab.path, text)}
               onSave={() => void saveActive()}
-              onCursor={(line, column) => (cursor = { line, column })}
+              onCursor={(line, column) => {
+                if (key === activeKey) cursor = { line, column }
+              }}
             />
-          {/key}
-        {:else}
+          </div>
+        {/each}
+        {#if !activeTab}
           <div class="flex h-full items-center justify-center text-sm text-slate-500">
             {project ? 'Open a file from a host.' : 'No project open.'}
           </div>
