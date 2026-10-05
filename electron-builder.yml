@@ -1,0 +1,47 @@
+appId: dk.fumlersoft.edit-remote
+productName: edit-remote
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!svelte.config.mjs'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!scripts/*'
+  - '!.github/**'
+  - '!config/**'
+  - '!FUNCTIONALITY.md'
+asarUnpack:
+  - '**/*.node'
+win:
+  executableName: edit-remote
+  verifyUpdateCodeSignature: false
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+portable:
+  artifactName: ${name}-${version}-portable.${ext}
+linux:
+  category: Network
+  maintainer: fumlersoft
+  target:
+    - AppImage
+    - deb
+appImage:
+  artifactName: ${name}-${version}.${ext}
+deb:
+  artifactName: ${name}-${version}.${ext}
+publish:
+  provider: github
+  owner: trasherdk
+  repo: edit-remote
+  releaseType: release
+npmRebuild: true
