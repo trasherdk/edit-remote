@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
 
 let chosen: string | null = null
@@ -11,15 +11,31 @@ export function bindConfigWindow(getWindow: () => BrowserWindow | null): void {
   windowForDialog = getWindow
 }
 
+function launchedExeDir(): string | null {
+  if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR
+  if (app.isPackaged) return dirname(app.getPath('exe'))
+  return null
+}
+
 function pointerPath(): string {
+  const home = launchedExeDir()
+  if (home) return join(home, 'config-location.json')
   return join(app.getPath('userData'), 'config-location.json')
+}
+
+function resolvePointedDir(dir: string): string {
+  const home = launchedExeDir()
+  if (home && !isAbsolute(dir)) return join(home, dir)
+  return dir
 }
 
 async function readPointer(): Promise<string | null> {
   try {
     const parsed = JSON.parse(await readFile(pointerPath(), 'utf8')) as { dir?: unknown }
-    if (typeof parsed.dir !== 'string' || !existsSync(parsed.dir)) return null
-    return parsed.dir
+    if (typeof parsed.dir !== 'string' || !parsed.dir) return null
+    const dir = resolvePointedDir(parsed.dir)
+    if (!existsSync(dir)) return null
+    return dir
   } catch {
     return null
   }
@@ -43,6 +59,20 @@ async function moveLegacyFile(name: string, dir: string): Promise<void> {
 
 /** Folder the user chose for session and secrets. Does not prompt. */
 export async function knownConfigDir(): Promise<string | null> {
+  const home = launchedExeDir()
+  if (home) {
+    if (chosen && existsSync(chosen)) return chosen
+    const pointed = await readPointer()
+    if (pointed) {
+      chosen = pointed
+      return pointed
+    }
+    const dir = join(home, 'config')
+    await mkdir(dir, { recursive: true })
+    await writePointer('config')
+    chosen = dir
+    return dir
+  }
   if (chosen && existsSync(chosen)) return chosen
   chosen = await readPointer()
   return chosen
