@@ -591,8 +591,8 @@
           <div
             class="flex max-w-56 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
             key
-              ? 'border-line bg-tab-active'
-              : 'border-transparent bg-tab'} {dragKey === key ? 'opacity-40' : ''}"
+              ? 'border-line border-t-accent bg-panel text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
+              : 'border-transparent text-slate-500 hover:text-slate-300'} {dragKey === key ? 'opacity-40' : ''}"
             role="listitem"
             ondragover={tabDragOver}
             ondrop={(event) => tabDrop(event, key)}
@@ -643,8 +643,8 @@
           </div>
         {/if}
       </div>
-      <footer class="flex items-center justify-between gap-3 border-t border-line bg-panel px-3 py-1 text-xs text-slate-300">
-        <span class="truncate">
+      <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-line bg-panel px-3 py-1 text-xs text-slate-300">
+        <span class="min-w-0 flex-1 truncate">
           {#if activeTab && selectedHost && activeTab.hostId === selectedHost.id}
             {identity(selectedHost, activeTab.path)}
           {:else if activeTab}
@@ -657,8 +657,8 @@
         </span>
         <span class="flex shrink-0 items-center gap-3">
           <span>{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
-          <button class="hover:text-white" title="Check for updates" onclick={() => void window.api.app.checkForUpdates()}>
-            {appVersion}
+          <button class="shrink-0 font-mono text-slate-100 hover:text-white" title="Check for updates" onclick={() => void window.api.app.checkForUpdates()}>
+            {appVersion ? `v${appVersion}` : ''}
           </button>
         </span>
       </footer>

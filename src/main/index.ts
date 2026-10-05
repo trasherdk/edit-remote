@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
 import type { HostInput, HostStatusEvent } from '../shared/types'
@@ -30,9 +31,15 @@ function sendStatus(event: HostStatusEvent): void {
   window.webContents.send('host:status', event)
 }
 
+function windowIcon(): string | undefined {
+  const path = join(__dirname, '../../build/icon.png')
+  return existsSync(path) ? path : undefined
+}
+
 function createWindow(): void {
   void getWindowBounds().then((bounds) => {
     mainWindow = new BrowserWindow({
+      icon: windowIcon(),
       width: bounds?.width ?? 1200,
       height: bounds?.height ?? 800,
       x: bounds?.x,
