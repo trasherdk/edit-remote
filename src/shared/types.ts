@@ -80,7 +80,7 @@ export type FileStamp = FileBaseline & {
   inPlace: boolean
 }
 
-export type UpdateChannel = 'stable' | 'prerelease'
+export type UpdateChannel = 'stable' | 'beta' | 'rc'
 
 export type AppSettings = {
   updateChannel: UpdateChannel
