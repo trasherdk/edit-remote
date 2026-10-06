@@ -1,3 +1,4 @@
+import './user-data'
 import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
