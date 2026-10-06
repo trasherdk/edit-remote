@@ -10,13 +10,13 @@ A **host** lives in the settings folder and is shared by every project. Fields a
 
 Connect and disconnect are per host. The state is disconnected, connecting, connected, or failed. One SFTP session per host is shared by every file on that host, with up to eight requests in flight. A session stays open after a transfer. It closes on disconnect, host removal, a dropped server, or quit. The next load, save, or listing opens a session again if there is none. Unknown or changed host keys require an explicit accept, and the accepted fingerprint is stored. Editing stays allowed while the host is disconnected. Saving reconnects.
 
-**Open** is a dialog on a host. It starts at the last directory, then the host default. The side panel is a tree of remembered paths only, not the remote disk. A file can sit in the tree without a tab. Closing a tab unloads the buffer and leaves the file in the tree. Removing a dirty file asks first. A path that fails to load stays in the tree, and the row shows the error.
+**Open** is a dialog on a host. It starts at the last directory, then the host default. The side panel is a tree of remembered paths only, not the remote disk. A file can sit in the tree without a tab. A click selects that file, so the next command can remove it. If the file already has a tab, the click focuses it. A double-click loads it. Closing a tab unloads the buffer and leaves the file in the tree. Removing a dirty file asks first. A path that fails to load stays in the tree, and the row shows the error.
 
 The editor is tabbed. A tab and a tree row use the short file name. Hover and the status bar use `alias:/path`. Tabs can be dragged. Each tab keeps its scroll position and cursor. Ctrl+Tab switches between the last two tabs. Alt+1 through Alt+9 pick a tab. The editor is CodeMirror: undo, find and replace, syntax highlighting from the extension, tab indent, and completion of words already in the buffer (Ctrl+Space). Files over 5 MB, files with a NUL byte, and files that are not UTF-8 are refused.
 
-The host toolbar sits above the side panel. The editor toolbar sits above the editor. The same commands are in the File and Host menus.
+The host toolbar sits above the side panel. The editor toolbar sits above the editor. The same commands are in the Project and Host menus.
 
-- File: New project (Ctrl+N), Open project (Ctrl+O), Save (Ctrl+S), Save all (Ctrl+Shift+S), Close tab (Ctrl+W), Close all tabs.
+- Project: New project (Ctrl+N), Open project (Ctrl+O), Save (Ctrl+S), Save all (Ctrl+Shift+S), Close tab (Ctrl+W), Close all tabs.
 - Host: Add, Edit, Duplicate, Remove, Connect, Disconnect, Open file, Remove file.
 
 On the Hosts tab, host actions follow a selected host row. With no row selected they are off, even if a file tab is open. On the Files tab, selecting a file selects its host. Close all tabs asks once when any buffer is dirty, then unloads every tab and leaves the files in the tree.
