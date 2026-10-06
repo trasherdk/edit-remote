@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { EditRemoteApi, HostInput, HostStatusEvent, ListResult, MenuCommand, Project, RememberedFile } from '../shared/types'
+import type { AppSettings, EditRemoteApi, HostInput, HostStatusEvent, ListResult, MenuCommand, Project, RememberedFile } from '../shared/types'
 
 const api: EditRemoteApi = {
   encryptionAvailable: () => ipcRenderer.invoke('app:encryptionAvailable'),
   app: {
     version: () => ipcRenderer.invoke('app:version'),
     checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates')
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
+    save: (settings: AppSettings) => ipcRenderer.invoke('settings:save', settings)
   },
   project: {
     create: () => ipcRenderer.invoke('project:create'),

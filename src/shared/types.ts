@@ -80,6 +80,12 @@ export type FileStamp = FileBaseline & {
   inPlace: boolean
 }
 
+export type UpdateChannel = 'stable' | 'prerelease'
+
+export type AppSettings = {
+  updateChannel: UpdateChannel
+}
+
 export type MenuCommand =
   | 'project:new'
   | 'project:open'
@@ -95,6 +101,7 @@ export type MenuCommand =
   | 'host:disconnect'
   | 'file:open'
   | 'file:remove'
+  | 'app:settings'
 
 export type DirEntry = {
   name: string
@@ -122,6 +129,10 @@ export type EditRemoteApi = {
   app: {
     version: () => Promise<string>
     checkForUpdates: () => Promise<void>
+  }
+  settings: {
+    get: () => Promise<AppSettings>
+    save: (settings: AppSettings) => Promise<void>
   }
   project: {
     create: () => Promise<Project | null>

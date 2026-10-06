@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
-import type { HostInput, HostStatusEvent } from '../shared/types'
+import type { HostInput, HostStatusEvent, UpdateChannel } from '../shared/types'
 import { deleteHost, duplicateHost, listHosts, saveHost } from './hosts'
 import { installMenu } from './menu'
 import {
@@ -16,7 +16,9 @@ import {
   restoreProject,
   saveCollapsed,
   saveOpenFiles,
-  saveWindowBounds
+  saveWindowBounds,
+  getUpdateChannel,
+  setUpdateChannel
 } from './project'
 import { readSshConfig } from './ssh-config'
 import { bindConfigWindow } from './config-home'
@@ -213,6 +215,15 @@ function registerIpc(): void {
     return version
   })
   ipcMain.handle('app:checkForUpdates', () => wrap(() => checkForUpdates(true)))
+
+  ipcMain.handle('settings:get', () => wrap(async () => ({ updateChannel: await getUpdateChannel() })))
+  ipcMain.handle('settings:save', (_event, input: unknown) =>
+    wrap(async () => {
+      const row = input && typeof input === 'object' ? (input as { updateChannel?: unknown }) : {}
+      const channel: UpdateChannel = row.updateChannel === 'prerelease' ? 'prerelease' : 'stable'
+      await setUpdateChannel(channel)
+    })
+  )
 }
 
 bindConfigWindow(() => mainWindow)

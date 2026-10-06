@@ -56,6 +56,10 @@ export function installMenu(getWindow: () => BrowserWindow | null): void {
         item('Open file', 'file:open'),
         item('Remove file', 'file:remove')
       ]
+    },
+    {
+      label: 'Settings',
+      submenu: [item('Settings…', 'app:settings')]
     }
   ]
 

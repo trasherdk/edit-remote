@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { DirEntry, HostInput, HostProfile, HostStatus, LineEnding, MenuCommand, Project, RememberedFile, SshConfigHost } from '@shared/types'
+  import type { DirEntry, HostInput, HostProfile, HostStatus, LineEnding, MenuCommand, Project, RememberedFile, SshConfigHost, UpdateChannel } from '@shared/types'
   import { onMount } from 'svelte'
   import BrowseDialog from './components/BrowseDialog.svelte'
   import EditorTab from './components/EditorTab.svelte'
   import FileTree from './components/FileTree.svelte'
   import HostDialog from './components/HostDialog.svelte'
+  import SettingsDialog from './components/SettingsDialog.svelte'
   import ToolButton from './components/ToolButton.svelte'
   import { ancestorDirs, buildTree, fileName } from './lib/tree'
 
@@ -37,6 +38,8 @@
   let cursor = $state({ line: 1, column: 1 })
 
   let hostDialog = $state<null | { mode: 'add' | 'edit'; host: HostProfile | null }>(null)
+  let settingsOpen = $state(false)
+  let updateChannel = $state<UpdateChannel>('stable')
   let hostError = $state('')
 
   let browse = $state<null | { hostId: string; path: string; entries: DirEntry[]; error: string }>(null)
@@ -132,7 +135,7 @@
       await refreshStatuses()
     })()
     const onKey = (event: KeyboardEvent) => {
-      if (browse || hostDialog) return
+      if (browse || hostDialog || settingsOpen) return
       if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === 'Tab') {
         event.preventDefault()
         if (!event.repeat) toggleRecentTab()
@@ -640,8 +643,31 @@
     if (listHost) hostDialog = { mode: 'edit', host: listHost }
   }
 
+  async function openSettings(): Promise<void> {
+    try {
+      const settings = await window.api.settings.get()
+      updateChannel = settings.updateChannel
+      settingsOpen = true
+    } catch (err) {
+      banner = message(err)
+    }
+  }
+
+  async function saveSettings(channel: UpdateChannel): Promise<void> {
+    busy = true
+    try {
+      await window.api.settings.save({ updateChannel: channel })
+      updateChannel = channel
+      settingsOpen = false
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
   function runMenu(command: MenuCommand): void {
-    if (browse || hostDialog) return
+    if (browse || hostDialog || settingsOpen) return
     if (command === 'project:new') void newProject()
     else if (command === 'project:open') void openProject()
     else if (command === 'file:save') void saveActive()
@@ -656,6 +682,7 @@
     else if (command === 'host:disconnect') void disconnectSelected()
     else if (command === 'file:open') void openBrowse()
     else if (command === 'file:remove') void forgetSelectedFile()
+    else if (command === 'app:settings') void openSettings()
   }
 </script>
 
@@ -717,6 +744,8 @@
         <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
         <ToolButton label="Remove host" icon="remove-host" disabled={!listHost} onclick={() => void removeSelectedHost()} />
         <ToolButton label="Remove file" icon="remove-file" disabled={selection?.kind !== 'file'} onclick={() => void forgetSelectedFile()} />
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
+        <ToolButton label="Settings" icon="settings" onclick={() => void openSettings()} />
       </div>
       <div class="flex border-b border-line">
         <button
@@ -883,6 +912,15 @@
     </main>
   </div>
 </div>
+
+{#if settingsOpen}
+  <SettingsDialog
+    channel={updateChannel}
+    {busy}
+    onCancel={() => (settingsOpen = false)}
+    onSave={(channel) => void saveSettings(channel)}
+  />
+{/if}
 
 {#if hostDialog}
   <HostDialog
