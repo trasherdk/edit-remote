@@ -77,6 +77,35 @@
     return `${hostId}\0${path}`
   }
 
+  let tabStrip = $state<HTMLDivElement | undefined>(undefined)
+
+  function scrollTabStrip(event: WheelEvent): void {
+    const strip = tabStrip
+    if (!strip || strip.scrollWidth <= strip.clientWidth || event.deltaY === 0) return
+    const raw = event.deltaY
+    const delta =
+      event.deltaMode === WheelEvent.DOM_DELTA_LINE
+        ? raw * 16
+        : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+          ? raw * strip.clientWidth
+          : raw
+    event.preventDefault()
+    strip.scrollLeft += delta
+  }
+
+  $effect(() => {
+    const key = activeKey
+    const strip = tabStrip
+    const order = tabs.map((tab) => tabKey(tab.hostId, tab.path)).join('\n')
+    if (!key || !strip || !order) return
+    const tab = strip.querySelector('[data-active-tab="true"]')
+    if (!(tab instanceof HTMLElement)) return
+    const stripRect = strip.getBoundingClientRect()
+    const tabRect = tab.getBoundingClientRect()
+    if (tabRect.left < stripRect.left) strip.scrollLeft -= stripRect.left - tabRect.left
+    else if (tabRect.right > stripRect.right) strip.scrollLeft += tabRect.right - stripRect.right
+  })
+
   function message(err: unknown): string {
     return err instanceof Error ? err.message : String(err)
   }
@@ -828,16 +857,22 @@
           onclick={() => void saveAll()}
         />
       </div>
-      <div class="flex gap-1 overflow-auto border-b border-line bg-ink px-2 pt-2" role="list">
+      <div
+        class="flex flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-line bg-ink px-2 pt-2"
+        role="list"
+        bind:this={tabStrip}
+        onwheel={scrollTabStrip}
+      >
         {#each tabs as tab (tabKey(tab.hostId, tab.path))}
           {@const host = hosts.find((item) => item.id === tab.hostId)}
           {@const key = tabKey(tab.hostId, tab.path)}
           <div
-            class="flex max-w-56 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
+            class="flex max-w-56 shrink-0 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
             key
               ? 'border-line border-t-accent bg-panel text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
               : 'border-transparent text-slate-500 hover:text-slate-300'} {dragKey === key ? 'opacity-40' : ''}"
             role="listitem"
+            data-active-tab={activeKey === key ? 'true' : undefined}
             ondragover={tabDragOver}
             ondrop={(event) => tabDrop(event, key)}
           >

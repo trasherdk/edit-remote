@@ -1,6 +1,8 @@
 import { LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
+import { apacheLanguage } from './apache'
+import { assignLanguage } from './assign'
 
 const shellLanguage = LanguageDescription.of({
   name: 'Shell',
@@ -10,10 +12,31 @@ const shellLanguage = LanguageDescription.of({
   support: new LanguageSupport(StreamLanguage.define(shell))
 })
 
-const catalog = [shellLanguage, ...languages]
+const apacheConfig = LanguageDescription.of({
+  name: 'Apache',
+  alias: ['httpd', 'apache'],
+  filename: /^(?:httpd(?:-.+)?|apache2?)\.conf$|^\.htaccess$/i,
+  support: new LanguageSupport(apacheLanguage)
+})
+
+const assignConfig = LanguageDescription.of({
+  name: 'Configuration',
+  alias: ['conf'],
+  support: new LanguageSupport(assignLanguage)
+})
+
+const catalog = [apacheConfig, shellLanguage, ...languages]
 
 export function languageFor(name: string, text: string): LanguageDescription | null {
-  return LanguageDescription.matchFilename(catalog, name) ?? (shellShebang(text) ? shellLanguage : null)
+  const named = LanguageDescription.matchFilename(catalog, name)
+  if (named) return named
+  if (shellShebang(text)) return shellLanguage
+  if (/\.conf$/i.test(name)) return apacheSections(text) ? apacheConfig : assignConfig
+  return null
+}
+
+function apacheSections(text: string): boolean {
+  return /^\s*<\/?[A-Za-z]/m.test(text)
 }
 
 function shellShebang(text: string): boolean {
