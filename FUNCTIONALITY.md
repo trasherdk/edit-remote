@@ -12,7 +12,7 @@ Connect and disconnect are per host. The state is disconnected, connecting, conn
 
 **Open** is a dialog on a host. It starts at the last directory, then the host default. The side panel is a tree of remembered paths only, not the remote disk. A file can sit in the tree without a tab. A click selects that file, so the next command can remove it. If the file already has a tab, the click focuses it. A double-click loads it. Closing a tab unloads the buffer and leaves the file in the tree. Removing a dirty file asks first. A path that fails to load stays in the tree, and the row shows the error.
 
-The editor is tabbed. A tab and a tree row use the short file name. Hover and the status bar use `alias:/path`. Tabs can be dragged. Each tab keeps its scroll position and cursor. Ctrl+Tab switches between the last two tabs. Alt+1 through Alt+9 pick a tab. The editor is CodeMirror: undo, find and replace, syntax highlighting from the extension, tab indent, and completion of words already in the buffer (Ctrl+Space). Files over 5 MB, files with a NUL byte, and files that are not UTF-8 are refused.
+The editor is tabbed. A tab and a tree row use the short file name. Hover and the status bar use `alias:/path`. Tabs can be dragged. Each tab keeps its scroll position and cursor. Ctrl+Tab switches between the last two tabs. Alt+1 through Alt+9 pick a tab. The editor is CodeMirror: undo, find and replace, syntax highlighting from the file name, tab indent, and completion of words already in the buffer (Ctrl+Space). Files over 5 MB, files with a NUL byte, and files that are not UTF-8 are refused.
 
 The host toolbar sits above the side panel. The editor toolbar sits above the editor. The same commands are in the Project and Host menus.
 
