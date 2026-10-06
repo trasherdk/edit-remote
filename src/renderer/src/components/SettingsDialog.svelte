@@ -6,12 +6,14 @@
     channel,
     busy,
     onCancel,
-    onSave
+    onSave,
+    onCheck
   }: {
     channel: UpdateChannel
     busy: boolean
     onCancel: () => void
     onSave: (channel: UpdateChannel) => void
+    onCheck: (channel: UpdateChannel) => void
   } = $props()
 
   let picked = $state<UpdateChannel>(untrack(() => channel))
@@ -43,10 +45,12 @@
         </span>
       </label>
     </fieldset>
-    <p class="text-xs text-slate-400">Packaged builds check on startup and when the version in the status bar is clicked.</p>
-    <div class="flex justify-end gap-2 pt-1">
-      <button class="btn" type="button" onclick={onCancel} disabled={busy}>Cancel</button>
-      <button class="btn btn-accent" type="submit" disabled={busy}>Save</button>
+    <div class="flex items-center justify-between gap-2 pt-1">
+      <button class="btn" type="button" disabled={busy} onclick={() => onCheck(picked)}>Check for updates</button>
+      <span class="flex gap-2">
+        <button class="btn" type="button" onclick={onCancel} disabled={busy}>Cancel</button>
+        <button class="btn btn-accent" type="submit" disabled={busy}>Save</button>
+      </span>
     </div>
   </form>
 </div>

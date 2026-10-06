@@ -59,7 +59,7 @@ export function installMenu(getWindow: () => BrowserWindow | null): void {
     },
     {
       label: 'Settings',
-      submenu: [item('Settings…', 'app:settings')]
+      submenu: [item('Settings…', 'app:settings'), item('Check for updates', 'app:check-updates')]
     }
   ]
 
