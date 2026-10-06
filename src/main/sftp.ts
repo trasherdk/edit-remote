@@ -309,9 +309,9 @@ async function ask(message: string, detail: string, confirm: string): Promise<bo
 async function confirmReplace(hostId: string, remotePath: string, baseline: FileBaseline, current: FileBaseline): Promise<void> {
   const host = findHost(hostId)
   const label = `${host.displayName}:${remotePath}`
-  const haveSize = baseline.size !== null && current.size !== null
-  const haveMtime = baseline.mtime !== null && current.mtime !== null
-  if (!haveSize && !haveMtime) {
+  const serverSize = current.size !== null
+  const serverMtime = current.mtime !== null
+  if (!serverSize && !serverMtime) {
     const ok = await ask(
       `Overwrite ${label}?`,
       'The server did not report a size or modification time, so this save cannot check for outside changes.',
@@ -320,12 +320,17 @@ async function confirmReplace(hostId: string, remotePath: string, baseline: File
     if (!ok) throw new Error('Save cancelled.')
     return
   }
-  const sizeChanged = haveSize && baseline.size !== current.size
-  const timeChanged = haveMtime && baseline.mtime !== current.mtime
-  if (!sizeChanged && !timeChanged) return
+  const changes: string[] = []
+  if (baseline.size !== null && serverSize && baseline.size !== current.size) {
+    changes.push(`Size ${baseline.size} → ${current.size}`)
+  }
+  if (baseline.mtime !== null && serverMtime && baseline.mtime !== current.mtime) {
+    changes.push(`Modified ${when(baseline.mtime)} → ${when(current.mtime)}`)
+  }
+  if (changes.length === 0) return
   const ok = await ask(
     `${label} changed on the server`,
-    `Size ${baseline.size ?? 'unknown'} → ${current.size ?? 'unknown'}\nModified ${when(baseline.mtime)} → ${when(current.mtime)}\nOverwrite it with the text in the editor?`,
+    `${changes.join('\n')}\nOverwrite it with the text in the editor?`,
     'Overwrite'
   )
   if (!ok) throw new Error('Save cancelled.')
@@ -348,7 +353,8 @@ export async function readRemote(hostId: string, remotePath: string): Promise<Fi
     if (stats.size > MAX_FILE_BYTES) throw new Error('That file is larger than 5 MB')
     const data = await call<Buffer>((done) => session.sftp.readFile(remotePath, done))
     const text = decodeText(data)
-    const meta = stampOf(stats)
+    const after = await call<Stats>((done) => session.sftp.stat(remotePath, done))
+    const meta = stampOf(after)
     return {
       text,
       lineEnding: detectLineEnding(text),
