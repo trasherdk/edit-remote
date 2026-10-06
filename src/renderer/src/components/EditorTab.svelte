@@ -14,6 +14,7 @@ let {
     path,
     text,
     active,
+    readOnly = false,
     onChange,
     onSave,
     onCursor
@@ -21,6 +22,7 @@ let {
     path: string
     text: string
     active: boolean
+    readOnly?: boolean
     onChange: (text: string) => void
     onSave: () => void
     onCursor: (line: number, column: number) => void
@@ -68,6 +70,7 @@ let {
         doc: text,
         extensions: [
           basicSetup,
+          ...(readOnly ? [EditorState.readOnly.of(true)] : []),
           EditorState.languageData.of(() => [{ autocomplete: completeAnyWord, wordChars: '/._+~:@-' }]),
           indentUnit.of('\t'),
           oneDark,

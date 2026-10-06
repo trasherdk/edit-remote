@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'node:path'
-import type { HostInput, HostStatusEvent } from '../shared/types'
-import { deleteHost, listHosts, saveHost } from './hosts'
+import type { HostInput, HostStatusEvent, UpdateChannel } from '../shared/types'
+import { deleteHost, duplicateHost, listHosts, saveHost } from './hosts'
+import { installMenu } from './menu'
 import {
   createProject,
   forgetFile,
@@ -15,7 +16,9 @@ import {
   restoreProject,
   saveCollapsed,
   saveOpenFiles,
-  saveWindowBounds
+  saveWindowBounds,
+  getUpdateChannel,
+  setUpdateChannel
 } from './project'
 import { readSshConfig } from './ssh-config'
 import { bindConfigWindow } from './config-home'
@@ -47,7 +50,7 @@ function createWindow(): void {
       minWidth: 880,
       minHeight: 560,
       show: false,
-      autoHideMenuBar: true,
+      autoHideMenuBar: false,
       title: 'edit-remote',
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
@@ -176,6 +179,8 @@ function registerIpc(): void {
     })
   )
 
+  ipcMain.handle('host:duplicate', (_event, id: string) => wrap(() => duplicateHost(id)))
+
   ipcMain.handle('host:remove', (_event, id: string) =>
     wrap(async () => {
       await disconnectHost(id)
@@ -190,11 +195,15 @@ function registerIpc(): void {
   ipcMain.handle('host:disconnect', (_event, id: string) => wrap(() => disconnectHost(id)))
   ipcMain.handle('host:list', (_event, id: string, directory: string) => wrap(() => listRemote(id, directory)))
 
-  ipcMain.handle('file:read', (_event, hostId: string, path: string) =>
-    wrap(async () => ({ text: await readRemote(hostId, path) }))
-  )
-  ipcMain.handle('file:write', (_event, hostId: string, path: string, text: string) =>
-    wrap(() => writeRemote(hostId, path, text))
+  ipcMain.handle('file:read', (_event, hostId: string, path: string) => wrap(() => readRemote(hostId, path)))
+  ipcMain.handle('file:write', (_event, hostId: string, path: string, text: string, baseline: unknown) =>
+    wrap(() => {
+      const row = baseline && typeof baseline === 'object' ? (baseline as { size?: unknown; mtime?: unknown }) : {}
+      return writeRemote(hostId, path, text, {
+        size: typeof row.size === 'number' ? row.size : null,
+        mtime: typeof row.mtime === 'number' ? row.mtime : null
+      })
+    })
   )
   ipcMain.handle('file:remember', (_event, hostId: string, path: string) => wrap(() => rememberFile(hostId, path)))
   ipcMain.handle('file:forget', (_event, hostId: string, path: string) => wrap(() => forgetFile(hostId, path)))
@@ -206,6 +215,15 @@ function registerIpc(): void {
     return version
   })
   ipcMain.handle('app:checkForUpdates', () => wrap(() => checkForUpdates(true)))
+
+  ipcMain.handle('settings:get', () => wrap(async () => ({ updateChannel: await getUpdateChannel() })))
+  ipcMain.handle('settings:save', (_event, input: unknown) =>
+    wrap(async () => {
+      const row = input && typeof input === 'object' ? (input as { updateChannel?: unknown }) : {}
+      const channel: UpdateChannel = row.updateChannel === 'prerelease' ? 'prerelease' : 'stable'
+      await setUpdateChannel(channel)
+    })
+  )
 }
 
 bindConfigWindow(() => mainWindow)
@@ -216,6 +234,7 @@ bindSessionEvents(
 )
 
 app.whenReady().then(() => {
+  installMenu(() => mainWindow)
   registerIpc()
   startAutoUpdate(() => mainWindow)
   createWindow()

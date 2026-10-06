@@ -2,16 +2,20 @@ import { app, dialog, shell, type BrowserWindow } from 'electron'
 import { spawn } from 'node:child_process'
 import { chmodSync, createWriteStream, existsSync, readdirSync } from 'node:fs'
 import { basename, dirname, extname, join } from 'node:path'
-import { getUpdateDownloadDir, setUpdateDownloadDir } from './project'
+import { getUpdateChannel, getUpdateDownloadDir, setUpdateDownloadDir } from './project'
+import type { UpdateChannel } from '../shared/types'
 
 const APP_NAME = 'edit-remote'
 const FEED = 'https://api.github.com/repos/trasherdk/edit-remote/releases/latest'
+const RELEASES = 'https://api.github.com/repos/trasherdk/edit-remote/releases?per_page=30'
 
 type Channel = 'nsis' | 'appimage' | 'portable' | 'page'
 
 type GithubRelease = {
   tag_name: string
   html_url: string
+  draft?: boolean
+  prerelease?: boolean
   assets: { name: string; browser_download_url: string; size: number }[]
 }
 
@@ -83,15 +87,46 @@ function tagVersion(tag: string): string {
   return tag.replace(/^v/i, '')
 }
 
+const RELEASE_HEADERS = {
+  Accept: 'application/vnd.github+json',
+  'User-Agent': APP_NAME
+}
+
+function releaseKind(tag: string): 'stable' | 'beta' | 'rc' | null {
+  const version = tag.replace(/^v/i, '')
+  if (/^\d+\.\d+\.\d+$/.test(version)) return 'stable'
+  if (/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) return 'beta'
+  if (/^\d+\.\d+\.\d+-rc\.\d+$/.test(version)) return 'rc'
+  return null
+}
+
+function channelAllows(tag: string, channel: UpdateChannel): boolean {
+  const kind = releaseKind(tag)
+  if (kind === 'stable') return true
+  if (channel === 'prerelease') return kind === 'beta' || kind === 'rc'
+  return false
+}
+
 async function latestRelease(): Promise<GithubRelease> {
-  const res = await fetch(FEED, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': APP_NAME
-    }
-  })
+  const res = await fetch(FEED, { headers: RELEASE_HEADERS })
   if (!res.ok) throw new Error(`GitHub releases ${res.status}`)
   return (await res.json()) as GithubRelease
+}
+
+async function listedReleases(): Promise<GithubRelease[]> {
+  const res = await fetch(RELEASES, { headers: RELEASE_HEADERS })
+  if (!res.ok) throw new Error(`GitHub releases ${res.status}`)
+  const body = (await res.json()) as unknown
+  if (!Array.isArray(body)) throw new Error('GitHub releases returned an unexpected list')
+  return body as GithubRelease[]
+}
+
+async function chosenRelease(): Promise<GithubRelease | null> {
+  const channel = await getUpdateChannel()
+  if (channel === 'stable') return latestRelease()
+  const rows = (await listedReleases()).filter((release) => !release.draft && channelAllows(release.tag_name, channel))
+  rows.sort((left, right) => compareSemver(parseSemver(tagVersion(right.tag_name)), parseSemver(tagVersion(left.tag_name))))
+  return rows[0] ?? null
 }
 
 async function askToUpdate(version: string): Promise<boolean> {
@@ -306,7 +341,11 @@ export async function checkForUpdates(manual = false): Promise<void> {
   checking = true
   try {
     const kind = channel()
-    const release = await latestRelease()
+    const release = await chosenRelease()
+    if (!release) {
+      if (manual) await showUpToDate()
+      return
+    }
     const version = tagVersion(release.tag_name)
     if (!isNewer(version, app.getVersion())) {
       if (manual) await showUpToDate()

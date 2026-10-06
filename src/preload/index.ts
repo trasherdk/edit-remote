@@ -1,11 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { EditRemoteApi, HostInput, HostStatusEvent, ListResult, Project, RememberedFile } from '../shared/types'
+import type { AppSettings, EditRemoteApi, HostInput, HostStatusEvent, ListResult, MenuCommand, Project, RememberedFile } from '../shared/types'
 
 const api: EditRemoteApi = {
   encryptionAvailable: () => ipcRenderer.invoke('app:encryptionAvailable'),
   app: {
     version: () => ipcRenderer.invoke('app:version'),
     checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates')
+  },
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get') as Promise<AppSettings>,
+    save: (settings: AppSettings) => ipcRenderer.invoke('settings:save', settings)
   },
   project: {
     create: () => ipcRenderer.invoke('project:create'),
@@ -17,8 +21,14 @@ const api: EditRemoteApi = {
   },
   pickKeyFile: () => ipcRenderer.invoke('dialog:keyFile'),
   sshHosts: () => ipcRenderer.invoke('ssh:hosts'),
+  onMenu: (cb) => {
+    const listener = (_event: unknown, command: MenuCommand): void => cb(command)
+    ipcRenderer.on('menu:command', listener)
+    return () => ipcRenderer.removeListener('menu:command', listener)
+  },
   host: {
     save: (input: HostInput) => ipcRenderer.invoke('host:save', input),
+    duplicate: (id) => ipcRenderer.invoke('host:duplicate', id),
     remove: (id) => ipcRenderer.invoke('host:remove', id),
     statuses: () => ipcRenderer.invoke('host:statuses') as Promise<HostStatusEvent[]>,
     connect: (id) => ipcRenderer.invoke('host:connect', id),

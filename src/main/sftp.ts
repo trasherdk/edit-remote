@@ -1,9 +1,18 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { posix } from 'node:path'
 import { dialog, type BrowserWindow } from 'electron'
-import { Client, utils, type FileEntry, type SFTPWrapper } from 'ssh2'
-import { MAX_FILE_BYTES, type DirEntry, type HostStatusEvent, type ListResult } from '../shared/types'
+import { Client, utils, type FileEntry, type SFTPWrapper, type Stats } from 'ssh2'
+import {
+  MAX_FILE_BYTES,
+  type DirEntry,
+  type FileBaseline,
+  type FileContent,
+  type FileStamp,
+  type HostStatusEvent,
+  type LineEnding,
+  type ListResult
+} from '../shared/types'
 import { findHost, listHosts, readyHosts, setHostKey, setLastDirectory } from './hosts'
 import { getProject } from './project'
 import { readPassphrase } from './secrets'
@@ -253,6 +262,80 @@ export async function listRemote(hostId: string, requested: string): Promise<Lis
   })
 }
 
+function detectLineEnding(text: string): LineEnding {
+  const crlf = text.includes('\r\n')
+  const rest = text.replaceAll('\r\n', '')
+  const lf = rest.includes('\n')
+  const cr = rest.includes('\r')
+  if ([crlf, lf, cr].filter(Boolean).length > 1) return 'Mixed'
+  if (crlf) return 'CRLF'
+  if (cr) return 'CR'
+  return 'LF'
+}
+
+function stampOf(stats: Stats): { size: number | null; mtime: number | null; mode: number } {
+  return {
+    size: Number.isFinite(stats.size) ? stats.size : null,
+    mtime: stats.mtime ? stats.mtime : null,
+    mode: stats.mode || 0
+  }
+}
+
+function ownerCanWrite(mode: number): boolean {
+  if (!mode) return true
+  return (mode & 0o200) !== 0
+}
+
+function when(mtime: number | null): string {
+  if (mtime === null) return 'unknown'
+  return new Date(mtime * 1000).toISOString()
+}
+
+async function ask(message: string, detail: string, confirm: string): Promise<boolean> {
+  const parent = getWindow()
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Cancel', confirm],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    message,
+    detail
+  }
+  const choice = await (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options))
+  return choice.response === 1
+}
+
+async function confirmReplace(hostId: string, remotePath: string, baseline: FileBaseline, current: FileBaseline): Promise<void> {
+  const host = findHost(hostId)
+  const label = `${host.displayName}:${remotePath}`
+  const serverSize = current.size !== null
+  const serverMtime = current.mtime !== null
+  if (!serverSize && !serverMtime) {
+    const ok = await ask(
+      `Overwrite ${label}?`,
+      'The server did not report a size or modification time, so this save cannot check for outside changes.',
+      'Overwrite'
+    )
+    if (!ok) throw new Error('Save cancelled.')
+    return
+  }
+  const changes: string[] = []
+  if (baseline.size !== null && serverSize && baseline.size !== current.size) {
+    changes.push(`Size ${baseline.size} → ${current.size}`)
+  }
+  if (baseline.mtime !== null && serverMtime && baseline.mtime !== current.mtime) {
+    changes.push(`Modified ${when(baseline.mtime)} → ${when(current.mtime)}`)
+  }
+  if (changes.length === 0) return
+  const ok = await ask(
+    `${label} changed on the server`,
+    `${changes.join('\n')}\nOverwrite it with the text in the editor?`,
+    'Overwrite'
+  )
+  if (!ok) throw new Error('Save cancelled.')
+}
+
 function decodeText(buf: Buffer): string {
   if (buf.includes(0)) throw new Error('This file looks binary. The editor opens text only.')
   try {
@@ -262,24 +345,79 @@ function decodeText(buf: Buffer): string {
   }
 }
 
-export async function readRemote(hostId: string, remotePath: string): Promise<string> {
+export async function readRemote(hostId: string, remotePath: string): Promise<FileContent> {
   const session = await ensure(hostId)
   return enqueue(session, async () => {
-    const stats = await call<{ size: number; isDirectory: () => boolean }>((done) => session.sftp.stat(remotePath, done))
+    const stats = await call<Stats>((done) => session.sftp.stat(remotePath, done))
     if (stats.isDirectory()) throw new Error('That path is a directory')
     if (stats.size > MAX_FILE_BYTES) throw new Error('That file is larger than 5 MB')
     const data = await call<Buffer>((done) => session.sftp.readFile(remotePath, done))
-    return decodeText(data)
+    const text = decodeText(data)
+    const after = await call<Stats>((done) => session.sftp.stat(remotePath, done))
+    const meta = stampOf(after)
+    return {
+      text,
+      lineEnding: detectLineEnding(text),
+      writable: ownerCanWrite(meta.mode),
+      size: meta.size,
+      mtime: meta.mtime
+    }
   })
 }
 
-export async function writeRemote(hostId: string, remotePath: string, text: string): Promise<void> {
+function failWrite(done: (err: Error | undefined, value: void) => void): (err: Error | null | undefined) => void {
+  return (err) => done(err ?? undefined, undefined as void)
+}
+
+export async function writeRemote(hostId: string, remotePath: string, text: string, baseline: FileBaseline): Promise<FileStamp> {
   const session = await ensure(hostId)
   const body = Buffer.from(text, 'utf8')
   if (body.length > MAX_FILE_BYTES) throw new Error('That file is larger than 5 MB')
-  await enqueue(session, async () => {
-    await call<void>((done) => {
-      session.sftp.writeFile(remotePath, body, (err) => done(err ?? undefined, undefined as void))
-    })
+  return enqueue(session, async () => {
+    const before = await call<Stats>((done) => session.sftp.stat(remotePath, done))
+    const current = stampOf(before)
+    await confirmReplace(hostId, remotePath, baseline, current)
+    const tempPath = posix.join(parentOf(remotePath), `.${posix.basename(remotePath)}.${randomUUID()}.ertmp`)
+    const options = current.mode ? { mode: current.mode } : {}
+    let renamed = false
+    let inPlace = false
+    try {
+      try {
+        await call<void>((done) => session.sftp.writeFile(tempPath, body, options, failWrite(done)))
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err)
+        throw new Error(`Save failed before replacing the file. The remote file was not changed. ${detail}`)
+      }
+      try {
+        await call<void>((done) => session.sftp.ext_openssh_rename(tempPath, remotePath, failWrite(done)))
+        renamed = true
+      } catch {
+        try {
+          await call<void>((done) => session.sftp.rename(tempPath, remotePath, failWrite(done)))
+          renamed = true
+        } catch {
+          try {
+            await call<void>((done) => session.sftp.writeFile(remotePath, body, options, failWrite(done)))
+            inPlace = true
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err)
+            throw new Error(`Save failed while overwriting in place. The remote file may be incomplete. ${detail}`)
+          }
+        }
+      }
+      if (current.mode) {
+        await call<void>((done) => session.sftp.chmod(remotePath, current.mode, failWrite(done))).catch(() => undefined)
+      }
+      try {
+        const after = stampOf(await call<Stats>((done) => session.sftp.stat(remotePath, done)))
+        return { size: after.size, mtime: after.mtime, inPlace }
+      } catch {
+        return { size: body.length, mtime: null, inPlace }
+      }
+    } finally {
+      if (!renamed) {
+        await call<void>((done) => session.sftp.unlink(tempPath, failWrite(done))).catch(() => undefined)
+      }
+    }
   })
 }

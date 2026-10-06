@@ -79,6 +79,14 @@ export async function savePassphrase(hostId: string, passphrase: string): Promis
   await writeStore(store)
 }
 
+export async function copyPassphrase(fromId: string, toId: string): Promise<void> {
+  const store = await readStore()
+  const cipher = store.entries[hostKey(fromId)]
+  if (!cipher) return
+  store.entries[hostKey(toId)] = cipher
+  await writeStore(store)
+}
+
 export async function clearPassphrase(hostId: string): Promise<void> {
   const store = await readStore()
   delete store.entries[hostKey(hostId)]

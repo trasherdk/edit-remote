@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, normalize } from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
-import type { Project, RememberedFile, RestoredSession } from '../shared/types'
+import type { Project, RememberedFile, RestoredSession, UpdateChannel } from '../shared/types'
 import { askConfigDir, knownConfigDir } from './config-home'
 import { findHost, importLegacyHosts, listHosts, parseStoredHost, readyHosts } from './hosts'
 
@@ -18,6 +18,7 @@ type SessionFile = {
   bounds?: { x: number; y: number; width: number; height: number }
   trees?: StoredTree[]
   updateDownloadDir?: string
+  updateChannel?: UpdateChannel
 }
 
 type StoredProject = {
@@ -84,7 +85,8 @@ async function readSession(): Promise<SessionFile> {
       activeFile,
       bounds,
       trees,
-      updateDownloadDir: typeof parsed.updateDownloadDir === 'string' ? parsed.updateDownloadDir : undefined
+      updateDownloadDir: typeof parsed.updateDownloadDir === 'string' ? parsed.updateDownloadDir : undefined,
+      updateChannel: parsed.updateChannel === 'prerelease' ? 'prerelease' : 'stable'
     }
   } catch {
     return {}
@@ -116,6 +118,14 @@ export async function getUpdateDownloadDir(): Promise<string> {
 
 export async function setUpdateDownloadDir(dir: string): Promise<void> {
   await updateSession((prev) => ({ ...prev, updateDownloadDir: dir }))
+}
+
+export async function getUpdateChannel(): Promise<UpdateChannel> {
+  return (await readSession()).updateChannel ?? 'stable'
+}
+
+export async function setUpdateChannel(channel: UpdateChannel): Promise<void> {
+  await updateSession((prev) => ({ ...prev, updateChannel: channel }))
 }
 
 async function rememberLastProject(filePath: string, keepOpenFiles: boolean): Promise<void> {

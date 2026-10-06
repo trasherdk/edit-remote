@@ -1,10 +1,11 @@
 <script lang="ts">
-  import type { DirEntry, HostInput, HostProfile, HostStatus, Project, RememberedFile, SshConfigHost } from '@shared/types'
+  import type { DirEntry, HostInput, HostProfile, HostStatus, LineEnding, MenuCommand, Project, RememberedFile, SshConfigHost, UpdateChannel } from '@shared/types'
   import { onMount } from 'svelte'
   import BrowseDialog from './components/BrowseDialog.svelte'
   import EditorTab from './components/EditorTab.svelte'
   import FileTree from './components/FileTree.svelte'
   import HostDialog from './components/HostDialog.svelte'
+  import SettingsDialog from './components/SettingsDialog.svelte'
   import ToolButton from './components/ToolButton.svelte'
   import { ancestorDirs, buildTree, fileName } from './lib/tree'
 
@@ -13,6 +14,10 @@
     path: string
     text: string
     dirty: boolean
+    writable: boolean
+    lineEnding: LineEnding
+    size: number | null
+    mtime: number | null
   }
 
   type Selection = { kind: 'host'; hostId: string } | { kind: 'file'; hostId: string; path: string } | null
@@ -24,6 +29,7 @@
   let encryptionAvailable = $state(true)
   let banner = $state('')
   let busy = $state(false)
+  let saving = false
   let tabs = $state<Tab[]>([])
   let activeKey = $state<string | null>(null)
   let recentKey = $state<string | null>(null)
@@ -32,12 +38,16 @@
   let cursor = $state({ line: 1, column: 1 })
 
   let hostDialog = $state<null | { mode: 'add' | 'edit'; host: HostProfile | null }>(null)
+  let settingsOpen = $state(false)
+  let updateChannel = $state<UpdateChannel>('stable')
   let hostError = $state('')
 
   let browse = $state<null | { hostId: string; path: string; entries: DirEntry[]; error: string }>(null)
   let browseRequest = 0
   let collapsed = $state<RememberedFile[]>([])
   let dragKey = $state<string | null>(null)
+  let fileErrors = $state<Record<string, string>>({})
+  let saveNote = $state('')
   let appVersion = $state('')
   let statusEpoch = 0
 
@@ -79,6 +89,18 @@
     return hostStatus[hostId]?.status ?? 'disconnected'
   }
 
+  function setFileError(hostId: string, path: string, error: string | null): void {
+    const key = tabKey(hostId, path)
+    if (!error) {
+      if (!(key in fileErrors)) return
+      const next = { ...fileErrors }
+      delete next[key]
+      fileErrors = next
+      return
+    }
+    fileErrors = { ...fileErrors, [key]: error }
+  }
+
   function isDirty(hostId: string, path: string): boolean {
     return tabs.some((tab) => tab.hostId === hostId && tab.path === path && tab.dirty)
   }
@@ -113,7 +135,7 @@
       await refreshStatuses()
     })()
     const onKey = (event: KeyboardEvent) => {
-      if (browse || hostDialog) return
+      if (browse || hostDialog || settingsOpen) return
       if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === 'Tab') {
         event.preventDefault()
         if (!event.repeat) toggleRecentTab()
@@ -126,8 +148,10 @@
       }
     }
     window.addEventListener('keydown', onKey, true)
+    const stopMenu = window.api.onMenu((command) => runMenu(command))
     return () => {
       stop()
+      stopMenu()
       window.removeEventListener('keydown', onKey, true)
     }
   })
@@ -276,6 +300,7 @@
       hosts = removed.hosts
       if (removed.project) project = removed.project
       tabs = tabs.filter((tab) => tab.hostId !== hostId)
+      fileErrors = Object.fromEntries(Object.entries(fileErrors).filter(([key]) => !key.startsWith(`${hostId}\0`)))
       if (activeKey?.startsWith(`${hostId}\0`)) activeKey = tabs[0] ? tabKey(tabs[0].hostId, tabs[0].path) : null
       selection = null
       collapsed = collapsed.filter((item) => item.hostId !== hostId)
@@ -404,6 +429,11 @@
     revealFile(hostId, path)
   }
 
+  function selectFile(hostId: string, path: string): void {
+    if (tabs.some((tab) => tab.hostId === hostId && tab.path === path)) showTab(hostId, path)
+    else selection = { kind: 'file', hostId, path }
+  }
+
   function showTabAt(index: number): void {
     const tab = tabs[index]
     if (tab) showTab(tab.hostId, tab.path)
@@ -438,7 +468,17 @@
       setHostStatus(hostId, 'connected')
       project = await window.api.file.remember(hostId, path)
       if (!tabs.some((tab) => tabKey(tab.hostId, tab.path) === key)) {
-        tabs = [...tabs, { hostId, path, text: loaded.text, dirty: false }]
+        tabs = [...tabs, {
+          hostId,
+          path,
+          text: loaded.text,
+          dirty: false,
+          writable: loaded.writable,
+          lineEnding: loaded.lineEnding,
+          size: loaded.size,
+          mtime: loaded.mtime
+        }]
+        setFileError(hostId, path, null)
       }
       browse = null
       if (focus) {
@@ -451,6 +491,7 @@
       }
     } catch (err) {
       const text = message(err)
+      setFileError(hostId, path, text)
       if (browse) browse = { ...browse, error: text }
       else banner = text
     } finally {
@@ -460,11 +501,29 @@
 
   function closeTab(hostId: string, path: string): void {
     const key = tabKey(hostId, path)
+    const wasActive = activeKey === key
     tabs = tabs.filter((tab) => tabKey(tab.hostId, tab.path) !== key)
+    setFileError(hostId, path, null)
     if (recentKey === key) recentKey = null
-    if (activeKey === key) {
+    if (wasActive) {
       const next = tabs[tabs.length - 1]
       activeKey = next ? tabKey(next.hostId, next.path) : null
+      if (next) {
+        selection = { kind: 'file', hostId: next.hostId, path: next.path }
+        revealFile(next.hostId, next.path)
+        side = 'files'
+      } else {
+        selection = { kind: 'host', hostId }
+      }
+    } else if (selection?.kind === 'file' && selection.hostId === hostId && selection.path === path) {
+      const current = tabs.find((tab) => tabKey(tab.hostId, tab.path) === activeKey)
+      if (current) {
+        selection = { kind: 'file', hostId: current.hostId, path: current.path }
+        revealFile(current.hostId, current.path)
+        side = 'files'
+      } else {
+        selection = { kind: 'host', hostId }
+      }
     }
     persistOpenFiles()
   }
@@ -487,16 +546,92 @@
 
   function editText(hostId: string, path: string, text: string): void {
     const key = tabKey(hostId, path)
+    saveNote = ''
     tabs = tabs.map((tab) => (tabKey(tab.hostId, tab.path) === key ? { ...tab, text, dirty: true } : tab))
   }
 
-  async function saveTab(tab: Tab): Promise<void> {
+  async function saveTab(tab: Tab): Promise<boolean> {
+    if (tab.writable === false) return false
+    try {
+      const saved = await window.api.file.write(tab.hostId, tab.path, tab.text, { size: tab.size, mtime: tab.mtime })
+      const key = tabKey(tab.hostId, tab.path)
+      tabs = tabs.map((item) =>
+        tabKey(item.hostId, item.path) === key ? { ...item, dirty: false, size: saved.size, mtime: saved.mtime } : item
+      )
+      setFileError(tab.hostId, tab.path, null)
+      return saved.inPlace
+    } catch (err) {
+      const text = message(err)
+      if (text !== 'Save cancelled.') setFileError(tab.hostId, tab.path, text)
+      throw err
+    }
+  }
+
+  async function saveActive(): Promise<void> {
+    if (saving || !activeTab?.dirty || activeTab.writable === false) return
+    saving = true
     busy = true
     banner = ''
     try {
-      await window.api.file.write(tab.hostId, tab.path, tab.text)
-      const key = tabKey(tab.hostId, tab.path)
-      tabs = tabs.map((item) => (tabKey(item.hostId, item.path) === key ? { ...item, dirty: false } : item))
+      const inPlace = await saveTab(activeTab)
+      saveNote = inPlace ? 'Saved in place' : ''
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      saving = false
+      busy = false
+    }
+  }
+
+  async function saveAll(): Promise<void> {
+    const dirty = tabs.filter((tab) => tab.dirty && tab.writable !== false)
+    if (saving || dirty.length === 0) return
+    saving = true
+    busy = true
+    banner = ''
+    let inPlace = false
+    const problems: string[] = []
+    try {
+      for (const tab of dirty) {
+        const current = tabs.find((item) => tab.hostId === item.hostId && tab.path === item.path) ?? tab
+        if (!current.dirty) continue
+        try {
+          if (await saveTab(current)) inPlace = true
+        } catch (err) {
+          problems.push(message(err))
+        }
+      }
+      saveNote = inPlace ? 'Saved in place' : ''
+      if (problems.length) banner = problems.join('\n')
+    } finally {
+      saving = false
+      busy = false
+    }
+  }
+
+  function closeActiveTab(): void {
+    if (activeTab) closeTab(activeTab.hostId, activeTab.path)
+  }
+
+  function closeAllTabs(): void {
+    if (tabs.length === 0) return
+    if (hasDirty() && !confirm('Discard unsaved edits and close all tabs?')) return
+    for (const tab of tabs) setFileError(tab.hostId, tab.path, null)
+    tabs = []
+    activeKey = null
+    recentKey = null
+    persistOpenFiles()
+  }
+
+  async function duplicateSelected(): Promise<void> {
+    if (!listHost) return
+    busy = true
+    banner = ''
+    try {
+      const copied = await window.api.host.duplicate(listHost.id)
+      hosts = copied.hosts
+      selection = { kind: 'host', hostId: copied.host.id }
+      side = 'hosts'
     } catch (err) {
       banner = message(err)
     } finally {
@@ -504,15 +639,57 @@
     }
   }
 
-  async function saveActive(): Promise<void> {
-    if (activeTab) await saveTab(activeTab)
+  function beginEditHost(): void {
+    if (listHost) hostDialog = { mode: 'edit', host: listHost }
+  }
+
+  async function openSettings(): Promise<void> {
+    try {
+      const settings = await window.api.settings.get()
+      updateChannel = settings.updateChannel
+      settingsOpen = true
+    } catch (err) {
+      banner = message(err)
+    }
+  }
+
+  async function saveSettings(channel: UpdateChannel): Promise<void> {
+    busy = true
+    try {
+      await window.api.settings.save({ updateChannel: channel })
+      updateChannel = channel
+      settingsOpen = false
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
+  function runMenu(command: MenuCommand): void {
+    if (browse || hostDialog || settingsOpen) return
+    if (command === 'project:new') void newProject()
+    else if (command === 'project:open') void openProject()
+    else if (command === 'file:save') void saveActive()
+    else if (command === 'file:save-all') void saveAll()
+    else if (command === 'file:close') closeActiveTab()
+    else if (command === 'file:close-all') closeAllTabs()
+    else if (command === 'host:add') void beginAddHost()
+    else if (command === 'host:edit') beginEditHost()
+    else if (command === 'host:duplicate') void duplicateSelected()
+    else if (command === 'host:remove') void removeSelectedHost()
+    else if (command === 'host:connect') void connectSelected()
+    else if (command === 'host:disconnect') void disconnectSelected()
+    else if (command === 'file:open') void openBrowse()
+    else if (command === 'file:remove') void forgetSelectedFile()
+    else if (command === 'app:settings') void openSettings()
   }
 </script>
 
 <div class="flex h-full flex-col">
   {#if banner}
     <div class="flex items-start justify-between gap-3 border-b border-line bg-tab px-3 py-2 text-sm text-bad">
-      <span>{banner}</span>
+      <span class="whitespace-pre-wrap">{banner}</span>
       <button class="btn" onclick={() => (banner = '')}>Dismiss</button>
     </div>
   {/if}
@@ -548,12 +725,8 @@
         <ToolButton label="Open project" icon="open-project" onclick={() => void openProject()} />
         <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
         <ToolButton label="Add host" icon="add-host" onclick={() => void beginAddHost()} />
-        <ToolButton
-          label="Edit host"
-          icon="edit"
-          disabled={!listHost}
-          onclick={() => listHost && (hostDialog = { mode: 'edit', host: listHost })}
-        />
+        <ToolButton label="Edit host" icon="edit" disabled={!listHost} onclick={beginEditHost} />
+        <ToolButton label="Duplicate host" icon="duplicate" disabled={!listHost || busy} onclick={() => void duplicateSelected()} />
         <ToolButton
           label="Connect"
           icon="connect"
@@ -567,9 +740,12 @@
           onclick={() => void disconnectSelected()}
         />
         <ToolButton label="Open file" icon="open-file" disabled={!project || !listHost || busy} onclick={() => void openBrowse()} />
+        <ToolButton label="Close all tabs" icon="close-all" disabled={tabs.length === 0} onclick={closeAllTabs} />
         <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
         <ToolButton label="Remove host" icon="remove-host" disabled={!listHost} onclick={() => void removeSelectedHost()} />
         <ToolButton label="Remove file" icon="remove-file" disabled={selection?.kind !== 'file'} onclick={() => void forgetSelectedFile()} />
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
+        <ToolButton label="Settings" icon="settings" onclick={() => void openSettings()} />
       </div>
       <div class="flex border-b border-line">
         <button
@@ -609,7 +785,9 @@
                 collapsed={collapsedPaths(group.host.id)}
                 selectedPath={selection?.kind === 'file' && selection.hostId === group.host.id ? selection.path : null}
                 dirty={(path) => isDirty(group.host.id, path)}
+                error={(path) => fileErrors[tabKey(group.host.id, path)] ?? ''}
                 titleFor={(path) => identity(group.host, path)}
+                onSelect={(path) => selectFile(group.host.id, path)}
                 onOpen={(path) => void openRemote(group.host.id, path)}
                 onOpenDir={(path) => void openBrowseAt(group.host.id, path)}
                 onCollapsed={(paths) => setCollapsed(group.host.id, paths)}
@@ -622,7 +800,19 @@
 
     <main class="flex min-w-0 flex-1 flex-col">
       <div class="flex h-9 shrink-0 items-center gap-0.5 border-b border-line bg-panel px-1">
-        <ToolButton label="Save" icon="save" accent disabled={!activeTab?.dirty || busy} onclick={() => void saveActive()} />
+        <ToolButton
+          label="Save (Ctrl+S)"
+          icon="save"
+          accent
+          disabled={!activeTab?.dirty || activeTab.writable === false || busy}
+          onclick={() => void saveActive()}
+        />
+        <ToolButton
+          label="Save all (Ctrl+Shift+S)"
+          icon="save-all"
+          disabled={!tabs.some((tab) => tab.dirty && tab.writable !== false) || busy}
+          onclick={() => void saveAll()}
+        />
       </div>
       <div class="flex gap-1 overflow-auto border-b border-line bg-ink px-2 pt-2" role="list">
         {#each tabs as tab (tabKey(tab.hostId, tab.path))}
@@ -650,6 +840,9 @@
             >
               {fileName(tab.path)}
             </button>
+            {#if fileErrors[key]}
+              <span class="size-2.5 shrink-0 rounded-full bg-bad" title={fileErrors[key]} aria-label={fileErrors[key]}></span>
+            {/if}
             {#if tab.dirty}
               <span class="size-2.5 shrink-0 rounded-full bg-warn" title="Unsaved changes" aria-label="Unsaved changes"></span>
             {/if}
@@ -670,6 +863,7 @@
               path={tab.path}
               text={tab.text}
               active={key === activeKey}
+              readOnly={tab.writable === false}
               onChange={(text) => editText(tab.hostId, tab.path, text)}
               onSave={() => void saveActive()}
               onCursor={(line, column) => {
@@ -693,10 +887,22 @@
             {host ? identity(host, activeTab.path) : activeTab.path}
           {:else if selectedHost}
             {selectedHost.displayName}
-            {statusOf(selectedHost.id)}
           {/if}
         </span>
         <span class="flex shrink-0 items-center gap-3">
+          {#if activeTab?.writable === false}
+            <span>read-only</span>
+          {/if}
+          {#if activeTab}
+            <span>UTF-8</span>
+            <span>{activeTab.lineEnding}</span>
+            <span>{statusOf(activeTab.hostId)}</span>
+          {:else if selectedHost}
+            <span>{statusOf(selectedHost.id)}</span>
+          {/if}
+          {#if saveNote}
+            <span>{saveNote}</span>
+          {/if}
           <span>{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
           <button class="shrink-0 font-mono text-slate-100 hover:text-white" title="Check for updates" onclick={() => void window.api.app.checkForUpdates()}>
             {appVersion ? `v${appVersion}` : ''}
@@ -706,6 +912,15 @@
     </main>
   </div>
 </div>
+
+{#if settingsOpen}
+  <SettingsDialog
+    channel={updateChannel}
+    {busy}
+    onCancel={() => (settingsOpen = false)}
+    onSave={(channel) => void saveSettings(channel)}
+  />
+{/if}
 
 {#if hostDialog}
   <HostDialog

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte'
   import { flattenFileTree, type TreeNode } from '../lib/tree'
 
   let {
@@ -6,7 +7,9 @@
     collapsed,
     selectedPath,
     dirty,
+    error,
     titleFor,
+    onSelect,
     onOpen,
     onOpenDir,
     onCollapsed
@@ -15,13 +18,24 @@
     collapsed: string[]
     selectedPath: string | null
     dirty: (path: string) => boolean
+    error: (path: string) => string
     titleFor: (path: string) => string
+    onSelect: (path: string) => void
     onOpen: (path: string) => void
     onOpenDir: (path: string) => void
     onCollapsed: (paths: string[]) => void
   } = $props()
 
   const rows = $derived(flattenFileTree(nodes, new Set(collapsed)))
+  let root: HTMLDivElement | undefined = $state()
+
+  $effect(() => {
+    const path = selectedPath
+    if (!path || !root) return
+    void tick().then(() => {
+      root?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' })
+    })
+  })
 
   function toggle(path: string): void {
     onCollapsed(collapsed.includes(path) ? collapsed.filter((item) => item !== path) : [...collapsed, path])
@@ -29,6 +43,7 @@
 
 </script>
 
+<div class="contents" bind:this={root}>
 {#each rows as row (row.id)}
   {#if row.kind === 'dir'}
     <div class="flex w-full min-w-0 items-center px-2 text-sm leading-5 text-slate-200 select-none hover:bg-ink">
@@ -52,17 +67,23 @@
     </div>
   {:else}
     <button
-      class="flex w-full min-w-0 items-center px-2 text-left text-sm leading-5 {selectedPath === row.path
+      class="flex w-full min-w-0 items-center px-2 text-left text-sm leading-5 select-none {selectedPath === row.path
         ? 'bg-ink text-accent'
         : 'hover:bg-ink'}"
+      data-selected={selectedPath === row.path ? 'true' : undefined}
       title={titleFor(row.path)}
-      onclick={() => onOpen(row.path)}
+      onclick={() => onSelect(row.path)}
+      ondblclick={() => onOpen(row.path)}
     >
       <span class="shrink-0 font-mono text-sm leading-5 whitespace-pre text-slate-500">{row.gutter}</span>
       <span class="min-w-0 overflow-x-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
+      {#if error(row.path)}
+        <span class="ml-2 shrink-0 text-xs text-bad" title={error(row.path)}>error</span>
+      {/if}
       {#if dirty(row.path)}
-        <span class="shrink-0 text-xs text-warn">unsaved</span>
+        <span class="ml-2 shrink-0 text-xs text-warn">unsaved</span>
       {/if}
     </button>
   {/if}
 {/each}
+</div>
