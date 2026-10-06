@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
+import { installedUserDataDir } from './user-data'
 
 let chosen: string | null = null
 let pending: Promise<string | null> | null = null
@@ -20,7 +21,7 @@ function launchedExeDir(): string | null {
 function pointerPath(): string {
   const home = launchedExeDir()
   if (home) return join(home, 'config-location.json')
-  return join(app.getPath('userData'), 'config-location.json')
+  return join(installedUserDataDir(), 'config-location.json')
 }
 
 function resolvePointedDir(dir: string): string {
@@ -50,7 +51,7 @@ async function writePointer(dir: string): Promise<void> {
 }
 
 async function moveLegacyFile(name: string, dir: string): Promise<void> {
-  const from = join(app.getPath('userData'), name)
+  const from = join(installedUserDataDir(), name)
   const to = join(dir, name)
   if (!existsSync(from) || existsSync(to)) return
   await copyFile(from, to)
