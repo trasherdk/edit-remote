@@ -102,6 +102,7 @@ export type MenuCommand =
   | 'file:open'
   | 'file:remove'
   | 'app:settings'
+  | 'app:check-updates'
 
 export type DirEntry = {
   name: string

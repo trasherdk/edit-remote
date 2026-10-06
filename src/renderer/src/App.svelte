@@ -653,6 +653,19 @@
     }
   }
 
+  async function checkUpdates(channel: UpdateChannel): Promise<void> {
+    busy = true
+    try {
+      await window.api.settings.save({ updateChannel: channel })
+      updateChannel = channel
+      await window.api.app.checkForUpdates()
+    } catch (err) {
+      banner = message(err)
+    } finally {
+      busy = false
+    }
+  }
+
   async function saveSettings(channel: UpdateChannel): Promise<void> {
     busy = true
     try {
@@ -683,6 +696,7 @@
     else if (command === 'file:open') void openBrowse()
     else if (command === 'file:remove') void forgetSelectedFile()
     else if (command === 'app:settings') void openSettings()
+    else if (command === 'app:check-updates') void window.api.app.checkForUpdates()
   }
 </script>
 
@@ -919,6 +933,7 @@
     {busy}
     onCancel={() => (settingsOpen = false)}
     onSave={(channel) => void saveSettings(channel)}
+    onCheck={(channel) => void checkUpdates(channel)}
   />
 {/if}
 

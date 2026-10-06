@@ -25,7 +25,7 @@ On the Hosts tab, host actions follow a selected host row. With no row selected 
 
 A file whose mode has no owner-write bit opens read-only. A missing mode is treated as writable. Line endings are kept as loaded and shown in the status bar as LF, CRLF, CR, or Mixed. Encoding in the status bar is UTF-8, which is the only encoding the editor accepts. The bar also shows the connection state, the cursor, and the app version (`dev` or `portable` when that is what is running).
 
-A packaged build, installer or portable, keeps `config-location.json` next to the exe and the settings in a `config` folder there. `pnpm run dev` asks once and remembers the folder from the app-data pointer. A passphrase copied to another Windows user still cannot be decrypted. Settings, from the gear or the Settings menu, are stored in that folder. Updates follow stable releases unless beta and release-candidate builds are turned on. Packaged builds check on startup and when the version in the status bar is clicked. A stable release of the same version is still newer than its beta or rc.
+A packaged build, installer or portable, keeps `config-location.json` next to the exe and the settings in a `config` folder there. `pnpm run dev` asks once and remembers the folder from the app-data pointer. A passphrase copied to another Windows user still cannot be decrypted. Settings, from the gear or the Settings menu, are stored in that folder. Updates follow stable releases unless beta and release-candidate builds are turned on. Packaged builds check on startup, from Settings, from the Settings menu, and when the version in the status bar is clicked. A stable release of the same version is still newer than its beta or rc.
 
 The app does not look for git, OpenSSH, or an openssl program. Startup checks `safeStorage.isEncryptionAvailable()` and refuses to store a passphrase when encryption is unavailable.
 
@@ -55,6 +55,7 @@ pnpm release:patch
 pnpm release:minor
 pnpm release:major
 pnpm release:patch -- beta
+pnpm release -- beta
 pnpm release -- rc
 ```
 
