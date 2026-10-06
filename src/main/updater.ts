@@ -103,7 +103,8 @@ function releaseKind(tag: string): 'stable' | 'beta' | 'rc' | null {
 function channelAllows(tag: string, channel: UpdateChannel): boolean {
   const kind = releaseKind(tag)
   if (kind === 'stable') return true
-  if (channel === 'prerelease') return kind === 'beta' || kind === 'rc'
+  if (channel === 'beta') return kind === 'beta' || kind === 'rc'
+  if (channel === 'rc') return kind === 'rc'
   return false
 }
 

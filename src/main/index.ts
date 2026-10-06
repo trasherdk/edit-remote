@@ -220,7 +220,7 @@ function registerIpc(): void {
   ipcMain.handle('settings:save', (_event, input: unknown) =>
     wrap(async () => {
       const row = input && typeof input === 'object' ? (input as { updateChannel?: unknown }) : {}
-      const channel: UpdateChannel = row.updateChannel === 'prerelease' ? 'prerelease' : 'stable'
+      const channel: UpdateChannel = row.updateChannel === 'beta' || row.updateChannel === 'rc' ? row.updateChannel : 'stable'
       await setUpdateChannel(channel)
     })
   )

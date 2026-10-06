@@ -86,7 +86,12 @@ async function readSession(): Promise<SessionFile> {
       bounds,
       trees,
       updateDownloadDir: typeof parsed.updateDownloadDir === 'string' ? parsed.updateDownloadDir : undefined,
-      updateChannel: parsed.updateChannel === 'prerelease' ? 'prerelease' : 'stable'
+      updateChannel:
+        parsed.updateChannel === 'beta' || parsed.updateChannel === 'rc'
+          ? parsed.updateChannel
+          : parsed.updateChannel === 'prerelease'
+            ? 'beta'
+            : 'stable'
     }
   } catch {
     return {}

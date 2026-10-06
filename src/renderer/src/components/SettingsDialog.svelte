@@ -38,9 +38,16 @@
         </span>
       </label>
       <label class="flex items-start gap-2 text-sm">
-        <input class="mt-1" type="radio" name="update-channel" value="prerelease" bind:group={picked} />
+        <input class="mt-1" type="radio" name="update-channel" value="rc" bind:group={picked} />
         <span>
-          <span class="block">Beta and release candidates</span>
+          <span class="block">Release candidate</span>
+          <span class="block text-xs text-slate-400">Also offer rc builds, along with stable releases.</span>
+        </span>
+      </label>
+      <label class="flex items-start gap-2 text-sm">
+        <input class="mt-1" type="radio" name="update-channel" value="beta" bind:group={picked} />
+        <span>
+          <span class="block">Beta</span>
           <span class="block text-xs text-slate-400">Also offer beta and rc builds. A stable release of the same version is still newer.</span>
         </span>
       </label>
