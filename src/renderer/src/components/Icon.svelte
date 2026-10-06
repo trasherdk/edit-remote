@@ -41,6 +41,19 @@
     <path d="M14 2v4a2 2 0 0 0 2 2h4" />
     <path d="m14.5 12.5-5 5" />
     <path d="m9.5 12.5 5 5" />
+  {:else if name === 'duplicate'}
+    <rect width="12" height="12" x="8" y="8" rx="2" />
+    <path d="M4 16V6a2 2 0 0 1 2-2h10" />
+  {:else if name === 'close-all'}
+    <path d="M4 6h11" />
+    <path d="M4 12h11" />
+    <path d="M4 18h11" />
+    <path d="m16 15 4 4" />
+    <path d="m20 15-4 4" />
+  {:else if name === 'save-all'}
+    <path d="M12 3h6l3 3v13H8" />
+    <path d="M8 21H4a1 1 0 0 1-1-1V7l3-3h8" />
+    <path d="M14 21v-5H8v5" />
   {:else if name === 'save'}
     <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
     <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />

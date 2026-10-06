@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { HostInput, HostProfile } from '../shared/types'
 import { askConfigDir, knownConfigDir } from './config-home'
-import { adoptPassphrase, clearPassphrase, hasPassphrase, savePassphrase } from './secrets'
+import { adoptPassphrase, clearPassphrase, copyPassphrase, hasPassphrase, savePassphrase } from './secrets'
 
 export type StoredHost = Omit<HostProfile, 'hasPassphrase'>
 
@@ -128,6 +128,23 @@ export async function saveHost(input: HostInput): Promise<HostProfile[]> {
   catalog = existing ? catalog.map((host) => (host.id === id ? next : host)) : [...catalog, next]
   await writeCatalog()
   return listHosts()
+}
+
+export async function duplicateHost(id: string): Promise<{ hosts: HostProfile[]; host: HostProfile }> {
+  await readyHosts()
+  const host = findHost(id)
+  const copy: StoredHost = {
+    ...host,
+    id: randomUUID(),
+    displayName: `${host.displayName} copy`
+  }
+  await copyPassphrase(host.id, copy.id)
+  catalog = [...catalog, copy]
+  await writeCatalog()
+  const hosts = await listHosts()
+  const presented = hosts.find((item) => item.id === copy.id)
+  if (!presented) throw new Error('The copied host was not saved')
+  return { hosts, host: presented }
 }
 
 export async function deleteHost(id: string): Promise<HostProfile[]> {
