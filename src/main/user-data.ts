@@ -4,7 +4,7 @@ import { app } from 'electron'
 
 const APP_DATA_NAME = 'edit-remote'
 
-/** Roaming folder an installed build uses. Dev keeps the settings pointer here. */
+/** Roaming folder an installed build uses for its Chromium cache. */
 export function installedUserDataDir(): string {
   return join(app.getPath('appData'), APP_DATA_NAME)
 }

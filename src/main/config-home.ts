@@ -18,19 +18,38 @@ function launchedExeDir(): string | null {
   return null
 }
 
+function devProjectDir(): string {
+  return join(__dirname, '../..')
+}
+
 function pointerPath(): string {
   const home = launchedExeDir()
   if (home) return join(home, 'config-location.json')
-  return join(installedUserDataDir(), 'config-location.json')
+  return join(devProjectDir(), 'config-location.json')
+}
+
+/** Dev used to store its pointer in an app-data folder. */
+async function migrateDevPointer(): Promise<void> {
+  if (launchedExeDir()) return
+  const next = pointerPath()
+  const previous = [join(app.getPath('userData'), 'config-location.json'), join(installedUserDataDir(), 'config-location.json')]
+  for (const from of previous) {
+    if (from === next || !existsSync(from)) continue
+    if (!existsSync(next)) {
+      await mkdir(dirname(next), { recursive: true })
+      await copyFile(from, next)
+    }
+    await unlink(from)
+  }
 }
 
 function resolvePointedDir(dir: string): string {
-  const home = launchedExeDir()
-  if (home && !isAbsolute(dir)) return join(home, dir)
-  return dir
+  if (isAbsolute(dir)) return dir
+  return join(launchedExeDir() ?? devProjectDir(), dir)
 }
 
 async function readPointer(): Promise<string | null> {
+  await migrateDevPointer()
   try {
     const parsed = JSON.parse(await readFile(pointerPath(), 'utf8')) as { dir?: unknown }
     if (typeof parsed.dir !== 'string' || !parsed.dir) return null
@@ -43,6 +62,7 @@ async function readPointer(): Promise<string | null> {
 }
 
 async function writePointer(dir: string): Promise<void> {
+  await migrateDevPointer()
   const path = pointerPath()
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
