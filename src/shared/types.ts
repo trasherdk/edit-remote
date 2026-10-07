@@ -20,6 +20,9 @@ export type RememberedFile = {
   path: string
 }
 
+/** Stored path for a collapsed host row in the file list. Not a remote directory. */
+export const COLLAPSED_HOST = ''
+
 export type Project = {
   name: string
   filePath: string

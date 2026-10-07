@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, normalize } from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
-import type { Project, RememberedFile, RestoredSession, UpdateChannel } from '../shared/types'
+import { COLLAPSED_HOST, type Project, type RememberedFile, type RestoredSession, type UpdateChannel } from '../shared/types'
 import { askConfigDir, knownConfigDir } from './config-home'
 import { findHost, importLegacyHosts, listHosts, parseStoredHost, readyHosts } from './hosts'
 
@@ -44,6 +44,11 @@ function asRemembered(value: unknown): RememberedFile | null {
   return { hostId: String(value.hostId), path: String(value.path) }
 }
 
+function asCollapsed(value: unknown): RememberedFile | null {
+  if (!isRecord(value) || typeof value.hostId !== 'string' || value.hostId === '' || typeof value.path !== 'string') return null
+  return { hostId: value.hostId, path: value.path }
+}
+
 function samePath(a: string, b: string): boolean {
   const left = normalize(a)
   const right = normalize(b)
@@ -75,7 +80,7 @@ async function readSession(): Promise<SessionFile> {
     const trees = Array.isArray(parsed.trees)
       ? parsed.trees.flatMap((row) => {
           if (!isRecord(row) || typeof row.project !== 'string' || !Array.isArray(row.collapsed)) return []
-          const collapsed = row.collapsed.map(asRemembered).filter((file): file is RememberedFile => file !== null)
+          const collapsed = row.collapsed.map(asCollapsed).filter((file): file is RememberedFile => file !== null)
           return [{ project: row.project, collapsed }]
         })
       : []
@@ -244,9 +249,11 @@ export async function collapsedForCurrent(): Promise<RememberedFile[]> {
 export async function saveCollapsed(collapsed: RememberedFile[]): Promise<void> {
   const project = current
   if (!project) return
-  const kept = collapsed.filter((dir) =>
-    project.files.some((file) => file.hostId === dir.hostId && (file.path === dir.path || file.path.startsWith(`${dir.path}/`)))
-  )
+  const kept = collapsed.filter((dir) => {
+    const onHost = (file: RememberedFile): boolean => file.hostId === dir.hostId
+    if (dir.path === COLLAPSED_HOST) return project.files.some(onHost)
+    return project.files.some((file) => onHost(file) && (file.path === dir.path || file.path.startsWith(`${dir.path}/`)))
+  })
   await updateSession((prev) => {
     const trees = (prev.trees ?? []).filter((row) => !samePath(row.project, project.filePath))
     if (kept.length > 0) trees.push({ project: project.filePath, collapsed: kept })
