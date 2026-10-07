@@ -101,6 +101,7 @@ function releaseKind(tag: string): 'stable' | 'beta' | 'rc' | null {
 }
 
 function channelAllows(tag: string, channel: UpdateChannel): boolean {
+  if (channel === 'off') return false
   const kind = releaseKind(tag)
   if (kind === 'stable') return true
   if (channel === 'beta') return kind === 'beta' || kind === 'rc'
@@ -124,6 +125,7 @@ async function listedReleases(): Promise<GithubRelease[]> {
 
 async function chosenRelease(): Promise<GithubRelease | null> {
   const channel = await getUpdateChannel()
+  if (channel === 'off') return null
   if (channel === 'stable') return latestRelease()
   const rows = (await listedReleases()).filter((release) => !release.draft && channelAllows(release.tag_name, channel))
   rows.sort((left, right) => compareSemver(parseSemver(tagVersion(right.tag_name)), parseSemver(tagVersion(left.tag_name))))
@@ -333,6 +335,18 @@ export async function checkForUpdates(manual = false): Promise<void> {
         type: 'info',
         title: APP_NAME,
         message: 'Updates are checked in packaged builds.',
+        buttons: ['OK']
+      })
+    }
+    return
+  }
+  if ((await getUpdateChannel()) === 'off') {
+    if (manual) {
+      await showBox({
+        type: 'info',
+        title: APP_NAME,
+        message: 'Updates are turned off.',
+        detail: 'Choose a channel in Settings to check again.',
         buttons: ['OK']
       })
     }

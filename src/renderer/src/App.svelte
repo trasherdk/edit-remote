@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { DirEntry, HostInput, HostProfile, HostStatus, LineEnding, MenuCommand, Project, RememberedFile, SshConfigHost, UpdateChannel } from '@shared/types'
+  import { COLLAPSED_HOST, type DirEntry, type HostInput, type HostProfile, type HostStatus, type LineEnding, type MenuCommand, type Project, type RememberedFile, type SshConfigHost, type UpdateChannel } from '@shared/types'
   import { onMount } from 'svelte'
   import BrowseDialog from './components/BrowseDialog.svelte'
   import EditorTab from './components/EditorTab.svelte'
@@ -206,8 +206,12 @@
     void window.api.project.setOpenFiles(files, active)
   }
 
+  function hostFolded(hostId: string): boolean {
+    return collapsed.some((item) => item.hostId === hostId && item.path === COLLAPSED_HOST)
+  }
+
   function collapsedPaths(hostId: string): string[] {
-    return collapsed.filter((item) => item.hostId === hostId).map((item) => item.path)
+    return collapsed.filter((item) => item.hostId === hostId && item.path !== COLLAPSED_HOST).map((item) => item.path)
   }
 
   function persistCollapsed(): void {
@@ -216,13 +220,21 @@
   }
 
   function setCollapsed(hostId: string, paths: string[]): void {
-    collapsed = [...collapsed.filter((item) => item.hostId !== hostId), ...paths.map((path) => ({ hostId, path }))]
+    const fold = collapsed.filter((item) => item.hostId === hostId && item.path === COLLAPSED_HOST)
+    collapsed = [...collapsed.filter((item) => item.hostId !== hostId), ...fold, ...paths.map((path) => ({ hostId, path }))]
+    persistCollapsed()
+  }
+
+  function toggleHost(hostId: string): void {
+    collapsed = hostFolded(hostId)
+      ? collapsed.filter((item) => item.hostId !== hostId || item.path !== COLLAPSED_HOST)
+      : [...collapsed, { hostId, path: COLLAPSED_HOST }]
     persistCollapsed()
   }
 
   function revealFile(hostId: string, path: string): void {
     const ancestors = new Set(ancestorDirs(path))
-    const next = collapsed.filter((item) => item.hostId !== hostId || !ancestors.has(item.path))
+    const next = collapsed.filter((item) => item.hostId !== hostId || (item.path !== COLLAPSED_HOST && !ancestors.has(item.path)))
     if (next.length === collapsed.length) return
     collapsed = next
     persistCollapsed()
@@ -872,28 +884,41 @@
   {/if}
 
   <div class="flex min-h-0 flex-1">
-    {#snippet hostRow(host: HostProfile)}
-      <button
-        class="flex w-full min-w-0 items-center gap-2 px-2 py-0.5 text-left text-sm leading-5 hover:bg-ink {selection?.kind === 'host' &&
-        selection.hostId === host.id
-          ? 'bg-ink text-accent'
-          : ''}"
-        type="button"
-        title="Double-click to open a file"
-        onclick={() => (selection = { kind: 'host', hostId: host.id })}
-        ondblclick={() => void openBrowseFor(host)}
-      >
-        <span
-          class="h-2 w-2 shrink-0 rounded-full {statusOf(host.id) === 'connected'
-            ? 'bg-ok'
-            : statusOf(host.id) === 'connecting'
-              ? 'bg-warn'
-              : statusOf(host.id) === 'failed'
-                ? 'bg-bad'
-                : 'bg-slate-500'}"
-        ></span>
-        <span class="min-w-0 truncate">{host.displayName}</span>
-      </button>
+    {#snippet hostRow(host: HostProfile, foldable: boolean)}
+      {@const folded = foldable && hostFolded(host.id)}
+      {@const selected = selection?.kind === 'host' && selection.hostId === host.id}
+      <div class="flex w-full min-w-0 items-center hover:bg-ink {selected ? 'bg-ink' : ''}">
+        {#if foldable}
+          <button
+            class="shrink-0 cursor-default px-2 leading-5"
+            type="button"
+            aria-label={folded ? 'Expand' : 'Collapse'}
+            onclick={() => toggleHost(host.id)}
+          >
+            <span class="font-mono text-[17px] leading-none text-slate-500">{folded ? '▸' : '▾'}</span>
+          </button>
+        {/if}
+        <button
+          class="flex min-w-0 flex-1 items-center gap-2 text-left text-sm leading-5 {foldable ? 'pr-2' : 'px-2 py-0.5'} {selected
+            ? 'text-accent'
+            : ''}"
+          type="button"
+          title="Double-click to open a file"
+          onclick={() => (selection = { kind: 'host', hostId: host.id })}
+          ondblclick={() => void openBrowseFor(host)}
+        >
+          <span
+            class="h-2 w-2 shrink-0 rounded-full {statusOf(host.id) === 'connected'
+              ? 'bg-ok'
+              : statusOf(host.id) === 'connecting'
+                ? 'bg-warn'
+                : statusOf(host.id) === 'failed'
+                  ? 'bg-bad'
+                  : 'bg-slate-500'}"
+          ></span>
+          <span class="min-w-0 truncate">{host.displayName}</span>
+        </button>
+      </div>
     {/snippet}
 
     <aside class="flex w-80 shrink-0 flex-col border-r border-line bg-panel">
@@ -946,7 +971,7 @@
             <p class="px-2 py-3 text-sm text-slate-400">No hosts yet. Add one, or fill it from SSH config.</p>
           {:else}
             {#each hosts as host (host.id)}
-              {@render hostRow(host)}
+              {@render hostRow(host, false)}
             {/each}
           {/if}
         {:else if !project}
@@ -955,9 +980,7 @@
           <p class="px-2 py-3 text-sm text-slate-400">No files yet.</p>
         {:else}
           {#each fileGroups as group (group.host.id)}
-            <section class="mb-3">
-              {@render hostRow(group.host)}
-              <FileTree
+            <section class={hostFolded(group.host.id) ? 'mb-1' : 'mb-3'}>{@render hostRow(group.host, true)}{#if !hostFolded(group.host.id)}<FileTree
                 nodes={buildTree(group.paths)}
                 collapsed={collapsedPaths(group.host.id)}
                 selectedPath={selection?.kind === 'file' && selection.hostId === group.host.id ? selection.path : null}
@@ -968,8 +991,7 @@
                 onOpen={(path) => void openRemote(group.host.id, path)}
                 onOpenDir={(path) => void openBrowseAt(group.host.id, path)}
                 onCollapsed={(paths) => setCollapsed(group.host.id, paths)}
-              />
-            </section>
+              />{/if}</section>
           {/each}
         {/if}
       </div>

@@ -51,9 +51,24 @@
           <span class="block text-xs text-slate-400">Also offer beta and rc builds. A stable release of the same version is still newer.</span>
         </span>
       </label>
+      <label class="flex items-start gap-2 text-sm">
+        <input class="mt-1" type="radio" name="update-channel" value="off" bind:group={picked} />
+        <span>
+          <span class="block">Off</span>
+          <span class="block text-xs text-slate-400">Do not check for updates.</span>
+        </span>
+      </label>
     </fieldset>
     <div class="flex items-center justify-between gap-2 pt-1">
-      <button class="btn" type="button" disabled={busy} onclick={() => onCheck(picked)}>Check for updates</button>
+      <button
+        class="btn"
+        type="button"
+        disabled={busy || picked === 'off'}
+        title={picked === 'off' ? 'Choose a channel to check.' : undefined}
+        onclick={() => onCheck(picked)}
+      >
+        Check for updates
+      </button>
       <span class="flex gap-2">
         <button class="btn" type="button" onclick={onCancel} disabled={busy}>Cancel</button>
         <button class="btn btn-accent" type="submit" disabled={busy}>Save</button>
