@@ -87,7 +87,7 @@ async function readSession(): Promise<SessionFile> {
       trees,
       updateDownloadDir: typeof parsed.updateDownloadDir === 'string' ? parsed.updateDownloadDir : undefined,
       updateChannel:
-        parsed.updateChannel === 'beta' || parsed.updateChannel === 'rc'
+        parsed.updateChannel === 'off' || parsed.updateChannel === 'beta' || parsed.updateChannel === 'rc'
           ? parsed.updateChannel
           : parsed.updateChannel === 'prerelease'
             ? 'beta'
