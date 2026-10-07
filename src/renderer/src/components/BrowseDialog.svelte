@@ -22,7 +22,7 @@
     onClose: () => void
   } = $props()
 
-  let draft = $state(untrack(() => path))
+  let draft = $state(untrack(() => shownDirectory(path)))
   let selected = $state<DirEntry | null>(null)
   let listEl = $state<HTMLDivElement | null>(null)
   let pathInput = $state<HTMLInputElement | null>(null)
@@ -35,6 +35,13 @@
   function normalize(value: string): string {
     if (value === '' || value === '/') return '/'
     return value.replace(/\/+$/, '')
+  }
+
+  /** The field shows the directory with a trailing slash, so the next typed name stays inside it. */
+  function shownDirectory(value: string): string {
+    if (!value.startsWith('/')) return value
+    if (value === '/') return '/'
+    return value.endsWith('/') ? value : `${value}/`
   }
 
   function splitAbsolute(text: string): { dir: string; segment: string } {
@@ -119,7 +126,7 @@
     if (listed === lastListed) return
     lastListed = listed
     if (!owned) {
-      draft = listed
+      draft = shownDirectory(listed)
       selected = null
       pendingDir = null
       filter = ''
