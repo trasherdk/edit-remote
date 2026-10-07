@@ -86,12 +86,14 @@ function setTitle(): void {
   mainWindow?.setTitle(project ? `${project.name} — edit-remote` : 'edit-remote')
 }
 
-function wrap<T>(fn: () => Promise<T> | T): Promise<T> {
+type IpcResult<T> = { ok: true; value: T } | { ok: false; message: string }
+
+/** Resolve with a failure payload. A rejected handler is printed by Electron even when the window catches it. */
+function wrap<T>(fn: () => Promise<T> | T): Promise<IpcResult<T>> {
   return Promise.resolve()
     .then(fn)
-    .catch((err: unknown) => {
-      throw new Error(err instanceof Error ? err.message : String(err))
-    })
+    .then((value) => ({ ok: true as const, value }))
+    .catch((err: unknown) => ({ ok: false as const, message: err instanceof Error ? err.message : String(err) }))
 }
 
 function registerIpc(): void {

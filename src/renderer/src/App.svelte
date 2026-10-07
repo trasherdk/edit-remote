@@ -179,6 +179,7 @@
     window.addEventListener('keydown', onKey, true)
     const stopMenu = window.api.onMenu((command) => runMenu(command))
     return () => {
+      stopStartupRetry()
       stop()
       stopMenu()
       window.removeEventListener('keydown', onKey, true)
@@ -242,8 +243,136 @@
       if (active && tabs.some((tab) => tab.hostId === active.hostId && tab.path === active.path)) {
         focusFile(active.hostId, active.path)
       }
+      queueStartupRetry(restored.openFiles, active ?? null)
     } catch (err) {
       banner = message(err)
+    }
+  }
+
+  const STARTUP_RETRY_MS = 5000
+  let pendingOpen: RememberedFile[] = []
+  let startupOrder: RememberedFile[] = []
+  let startupActive: RememberedFile | null = null
+  let startupRetryTimer: ReturnType<typeof setTimeout> | null = null
+  let startupRetrying = false
+  const startupRetrySkip = new Set<string>()
+
+  function stopStartupRetry(): void {
+    pendingOpen = []
+    startupRetrySkip.clear()
+    if (startupRetryTimer !== null) {
+      clearTimeout(startupRetryTimer)
+      startupRetryTimer = null
+    }
+  }
+
+  function dropHostRetry(hostId: string): void {
+    startupRetrySkip.add(hostId)
+    pendingOpen = pendingOpen.filter((file) => file.hostId !== hostId)
+    if (pendingOpen.length === 0 && startupRetryTimer !== null) {
+      clearTimeout(startupRetryTimer)
+      startupRetryTimer = null
+    }
+  }
+
+  function scheduleStartupRetry(): void {
+    if (startupRetryTimer !== null || pendingOpen.length === 0) return
+    startupRetryTimer = setTimeout(() => {
+      startupRetryTimer = null
+      void retryStartupFiles()
+    }, STARTUP_RETRY_MS)
+  }
+
+  function queueStartupRetry(openFiles: RememberedFile[], active: RememberedFile | null): void {
+    startupOrder = openFiles
+    startupActive = active
+    startupRetrySkip.clear()
+    pendingOpen = openFiles.filter((file) => {
+      const open = tabs.some((tab) => tab.hostId === file.hostId && tab.path === file.path)
+      return !open && statusOf(file.hostId) !== 'connected'
+    })
+    scheduleStartupRetry()
+  }
+
+  function permanentConnectError(text: string): boolean {
+    return /passphrase|host key|authentication|bad password|encrypted|parse/i.test(text)
+  }
+
+  async function loadPendingFile(hostId: string, path: string): Promise<'loaded' | 'file' | 'offline'> {
+    const key = tabKey(hostId, path)
+    if (tabs.some((tab) => tabKey(tab.hostId, tab.path) === key)) return 'loaded'
+    const previous = fileErrors[key]
+    try {
+      const loaded = await window.api.file.read(hostId, path)
+      setHostStatus(hostId, 'connected')
+      if (!tabs.some((tab) => tabKey(tab.hostId, tab.path) === key)) {
+        tabs = [
+          ...tabs,
+          {
+            hostId,
+            path,
+            text: loaded.text,
+            dirty: false,
+            writable: loaded.writable,
+            lineEnding: loaded.lineEnding,
+            size: loaded.size,
+            mtime: loaded.mtime
+          }
+        ]
+        orderTabs(startupOrder)
+      }
+      setFileError(hostId, path, null)
+      if (previous && banner === previous) banner = ''
+      if (startupActive?.hostId === hostId && startupActive.path === path && activeKey === null) focusFile(hostId, path)
+      return 'loaded'
+    } catch (err) {
+      setFileError(hostId, path, message(err))
+      return statusOf(hostId) === 'connected' ? 'file' : 'offline'
+    }
+  }
+
+  async function retryHost(hostId: string): Promise<void> {
+    if (startupRetrySkip.has(hostId) || !pendingOpen.some((file) => file.hostId === hostId)) return
+    if (!hosts.some((host) => host.id === hostId)) {
+      dropHostRetry(hostId)
+      return
+    }
+    if (statusOf(hostId) === 'connecting') return
+    try {
+      if (statusOf(hostId) !== 'connected') {
+        await window.api.host.connect(hostId)
+        if (startupRetrySkip.has(hostId)) {
+          await window.api.host.disconnect(hostId)
+          return
+        }
+        setHostStatus(hostId, 'connected')
+      }
+    } catch (err) {
+      const text = message(err)
+      setHostStatus(hostId, 'failed', text)
+      for (const file of pendingOpen.filter((item) => item.hostId === hostId)) setFileError(file.hostId, file.path, text)
+      if (permanentConnectError(text)) dropHostRetry(hostId)
+      return
+    }
+    if (startupRetrySkip.has(hostId)) return
+    for (const file of pendingOpen.filter((item) => item.hostId === hostId)) {
+      if (startupRetrySkip.has(hostId)) return
+      if (!pendingOpen.some((item) => item.hostId === file.hostId && item.path === file.path)) continue
+      const result = await loadPendingFile(file.hostId, file.path)
+      if (result === 'file') pendingOpen = pendingOpen.filter((item) => item.hostId !== file.hostId || item.path !== file.path)
+    }
+  }
+
+  async function retryStartupFiles(): Promise<void> {
+    if (startupRetrying || pendingOpen.length === 0) return
+    startupRetrying = true
+    try {
+      const hostIds = [...new Set(pendingOpen.map((file) => file.hostId))]
+      await Promise.all(hostIds.map((hostId) => retryHost(hostId)))
+    } finally {
+      startupRetrying = false
+      pendingOpen = pendingOpen.filter((file) => !tabs.some((tab) => tab.hostId === file.hostId && tab.path === file.path))
+      if (pendingOpen.length > 0) scheduleStartupRetry()
     }
   }
 
@@ -257,6 +386,7 @@
       project = created
       collapsed = []
       side = 'hosts'
+      stopStartupRetry()
       tabs = []
       activeKey = null
       selection = null
@@ -280,6 +410,7 @@
       hosts = opened.hosts
       collapsed = opened.collapsed
       side = opened.project.files.length > 0 ? 'files' : 'hosts'
+      stopStartupRetry()
       tabs = []
       activeKey = null
       selection = null
@@ -328,6 +459,7 @@
       const removed = await window.api.host.remove(hostId)
       hosts = removed.hosts
       if (removed.project) project = removed.project
+      dropHostRetry(hostId)
       tabs = tabs.filter((tab) => tab.hostId !== hostId)
       fileErrors = Object.fromEntries(Object.entries(fileErrors).filter(([key]) => !key.startsWith(`${hostId}\0`)))
       if (activeKey?.startsWith(`${hostId}\0`)) activeKey = tabs[0] ? tabKey(tabs[0].hostId, tabs[0].path) : null
@@ -358,6 +490,7 @@
 
   async function disconnectSelected(): Promise<void> {
     if (!listHost) return
+    dropHostRetry(listHost.id)
     await window.api.host.disconnect(listHost.id)
   }
 
@@ -561,6 +694,7 @@
     if (selection?.kind !== 'file') return
     const { hostId, path } = selection
     if (isDirty(hostId, path) && !confirm(`Discard unsaved edits in ${fileName(path)} and remove it from the project?`)) return
+    pendingOpen = pendingOpen.filter((file) => file.hostId !== hostId || file.path !== path)
     busy = true
     try {
       project = await window.api.file.forget(hostId, path)
