@@ -20,3 +20,7 @@ Windows (NSIS setup and portable) and Linux (AppImage and .deb) builds are publi
 pnpm install
 pnpm run dev
 ```
+
+## License
+
+[MIT](LICENSE). Copyright 2026 TrasherDK. You can use, change, and ship this. It is provided as is, with no warranty, and you take responsibility for what you do with it.
