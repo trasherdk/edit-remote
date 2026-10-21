@@ -1,5 +1,6 @@
 import { execFileSync, execSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildReleaseNotes } from './changelog.mjs'
@@ -173,7 +174,21 @@ if (!pr || pr === 'null') {
   console.log(`Using existing PR ${pr}`)
 }
 
-execFileSync('gh', ['pr', 'merge', pr, '--merge', '--delete-branch=false'], { stdio: 'inherit' })
+const notesFile = join(tmpdir(), `edit-remote-${tag}-merge.txt`)
+writeFileSync(notesFile, `${changes.trim()}\n`)
+try {
+  execFileSync(
+    'gh',
+    ['pr', 'merge', pr, '--merge', '--delete-branch=false', '--subject', `Release ${tag}`, '--body-file', notesFile],
+    { stdio: 'inherit' }
+  )
+} finally {
+  try {
+    unlinkSync(notesFile)
+  } catch {
+    // The temp file only carries the merge message.
+  }
+}
 
 gitRun(['fetch', 'origin', 'master', 'develop', '--tags'])
 
