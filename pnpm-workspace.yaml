@@ -6,3 +6,6 @@ allowBuilds:
   electron-winstaller: true
 minimumReleaseAgeExclude:
   - electron@43.7.7
+overrides:
+  http-cache-semantics: 4.3.0
+  source-map-js: 1.2.2
