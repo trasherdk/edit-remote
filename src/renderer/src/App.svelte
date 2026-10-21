@@ -2,6 +2,7 @@
   import { COLLAPSED_HOST, type DirEntry, type HostInput, type HostProfile, type HostStatus, type LineEnding, type MenuCommand, type Project, type RememberedFile, type SshConfigHost, type UpdateChannel } from '@shared/types'
   import { onMount } from 'svelte'
   import BrowseDialog from './components/BrowseDialog.svelte'
+  import CompareTab from './components/CompareTab.svelte'
   import EditorTab from './components/EditorTab.svelte'
   import FileTree from './components/FileTree.svelte'
   import HostDialog from './components/HostDialog.svelte'
@@ -20,6 +21,15 @@
     mtime: number | null
   }
 
+  type OpenCompare = {
+    id: string
+    sourceHostId: string
+    sourcePath: string
+    destHostId: string
+    destPath: string
+    focus: 'source' | 'dest'
+  }
+
   type Selection = { kind: 'host'; hostId: string } | { kind: 'file'; hostId: string; path: string } | null
 
   let project = $state<Project | null>(null)
@@ -31,6 +41,7 @@
   let busy = $state(false)
   let saving = false
   let tabs = $state<Tab[]>([])
+  let compares = $state<OpenCompare[]>([])
   let activeKey = $state<string | null>(null)
   let recentKey = $state<string | null>(null)
   let selection = $state<Selection>(null)
@@ -52,6 +63,29 @@
   let statusEpoch = 0
 
   const activeTab = $derived(tabs.find((tab) => tabKey(tab.hostId, tab.path) === activeKey) ?? null)
+  const activeCompare = $derived(compares.find((item) => item.id === activeKey) ?? null)
+  const statusTab = $derived.by(() => {
+    if (activeTab) return activeTab
+    if (!activeCompare) return null
+    const hostId = activeCompare.focus === 'source' ? activeCompare.sourceHostId : activeCompare.destHostId
+    const path = activeCompare.focus === 'source' ? activeCompare.sourcePath : activeCompare.destPath
+    return tabs.find((tab) => tab.hostId === hostId && tab.path === path) ?? null
+  })
+  const comparePair = $derived.by(() => {
+    if (!activeTab) return null
+    const current = tabKey(activeTab.hostId, activeTab.path)
+    const others = tabs.filter((tab) => tabKey(tab.hostId, tab.path) !== current)
+    if (others.length === 0) return null
+    const recent = others.find((tab) => tabKey(tab.hostId, tab.path) === recentKey)
+    const source = recent ?? (others.length === 1 ? others[0] : null)
+    if (!source) return null
+    return { source, dest: activeTab }
+  })
+  const compareLabel = $derived(
+    comparePair
+      ? `Compare ${fileName(comparePair.source.path)} on the left with ${fileName(comparePair.dest.path)} on the right`
+      : 'Compare the previous file on the left with this file on the right'
+  )
   const selectedHostId = $derived(selection?.hostId ?? activeTab?.hostId ?? null)
   const selectedHost = $derived(hosts.find((host) => host.id === selectedHostId) ?? null)
   const listHost = $derived.by(() => {
@@ -202,7 +236,8 @@
 
   function persistOpenFiles(): void {
     const files = tabs.map((tab) => ({ hostId: tab.hostId, path: tab.path }))
-    const active = activeTab ? { hostId: activeTab.hostId, path: activeTab.path } : null
+    const current = activeTab ?? statusTab
+    const active = current ? { hostId: current.hostId, path: current.path } : null
     void window.api.project.setOpenFiles(files, active)
   }
 
@@ -400,7 +435,9 @@
       side = 'hosts'
       stopStartupRetry()
       tabs = []
+      compares = []
       activeKey = null
+      recentKey = null
       selection = null
       await refreshStatuses()
       persistOpenFiles()
@@ -424,7 +461,9 @@
       side = opened.project.files.length > 0 ? 'files' : 'hosts'
       stopStartupRetry()
       tabs = []
+      compares = []
       activeKey = null
+      recentKey = null
       selection = null
       await refreshStatuses()
       persistOpenFiles()
@@ -473,8 +512,10 @@
       if (removed.project) project = removed.project
       dropHostRetry(hostId)
       tabs = tabs.filter((tab) => tab.hostId !== hostId)
+      compares = compares.filter((item) => item.sourceHostId !== hostId && item.destHostId !== hostId)
       fileErrors = Object.fromEntries(Object.entries(fileErrors).filter(([key]) => !key.startsWith(`${hostId}\0`)))
-      if (activeKey?.startsWith(`${hostId}\0`)) activeKey = tabs[0] ? tabKey(tabs[0].hostId, tabs[0].path) : null
+      if (activeKey && !liveKey(activeKey)) activeKey = tabs[0] ? tabKey(tabs[0].hostId, tabs[0].path) : null
+      if (recentKey && !liveKey(recentKey)) recentKey = null
       selection = null
       collapsed = collapsed.filter((item) => item.hostId !== hostId)
       persistCollapsed()
@@ -608,13 +649,89 @@
     else selection = { kind: 'file', hostId, path }
   }
 
+  function liveKey(key: string): boolean {
+    if (tabs.some((tab) => tabKey(tab.hostId, tab.path) === key)) return true
+    return compares.some((item) => item.id === key)
+  }
+
+  function compareKey(source: Tab, dest: Tab): string {
+    return `compare\0${source.hostId}\0${source.path}\0${dest.hostId}\0${dest.path}`
+  }
+
+  function activateCompare(id: string): void {
+    const compare = compares.find((item) => item.id === id)
+    if (!compare) return
+    if (activeKey && activeKey !== id) recentKey = activeKey
+    activeKey = id
+    const hostId = compare.focus === 'source' ? compare.sourceHostId : compare.destHostId
+    const path = compare.focus === 'source' ? compare.sourcePath : compare.destPath
+    selection = { kind: 'file', hostId, path }
+    side = 'files'
+  }
+
+  function openCompare(): void {
+    const pair = comparePair
+    if (!pair) {
+      banner = 'Open two files. Compare puts the previous file on the left and the current file on the right.'
+      return
+    }
+    const id = compareKey(pair.source, pair.dest)
+    if (!compares.some((item) => item.id === id)) {
+      compares = [
+        ...compares,
+        {
+          id,
+          sourceHostId: pair.source.hostId,
+          sourcePath: pair.source.path,
+          destHostId: pair.dest.hostId,
+          destPath: pair.dest.path,
+          focus: 'dest'
+        }
+      ]
+    }
+    activateCompare(id)
+  }
+
+  function closeCompare(id: string): void {
+    const wasActive = activeKey === id
+    compares = compares.filter((item) => item.id !== id)
+    if (recentKey === id) recentKey = null
+    if (!wasActive) return
+    const next = tabs[tabs.length - 1]
+    activeKey = next ? tabKey(next.hostId, next.path) : null
+    if (next) {
+      selection = { kind: 'file', hostId: next.hostId, path: next.path }
+      revealFile(next.hostId, next.path)
+      side = 'files'
+    }
+  }
+
+  function focusCompareSide(id: string, focus: 'source' | 'dest'): void {
+    compares = compares.map((item) => (item.id === id ? { ...item, focus } : item))
+    if (activeKey !== id) return
+    const item = compares.find((entry) => entry.id === id)
+    if (!item) return
+    const hostId = focus === 'source' ? item.sourceHostId : item.destHostId
+    const path = focus === 'source' ? item.sourcePath : item.destPath
+    selection = { kind: 'file', hostId, path }
+  }
+
   function showTabAt(index: number): void {
     const tab = tabs[index]
-    if (tab) showTab(tab.hostId, tab.path)
+    if (tab) {
+      showTab(tab.hostId, tab.path)
+      return
+    }
+    const compare = compares[index - tabs.length]
+    if (compare) activateCompare(compare.id)
   }
 
   function toggleRecentTab(): void {
     if (!recentKey || recentKey === activeKey) return
+    if (compares.some((item) => item.id === recentKey)) {
+      activateCompare(recentKey)
+      return
+    }
     const tab = tabs.find((item) => tabKey(item.hostId, item.path) === recentKey)
     if (!tab) {
       recentKey = null
@@ -677,9 +794,20 @@
     const key = tabKey(hostId, path)
     const wasActive = activeKey === key
     tabs = tabs.filter((tab) => tabKey(tab.hostId, tab.path) !== key)
+    const dropped = new Set(
+      compares
+        .filter(
+          (item) =>
+            (item.sourceHostId === hostId && item.sourcePath === path) ||
+            (item.destHostId === hostId && item.destPath === path)
+        )
+        .map((item) => item.id)
+    )
+    if (dropped.size > 0) compares = compares.filter((item) => !dropped.has(item.id))
     setFileError(hostId, path, null)
-    if (recentKey === key) recentKey = null
-    if (wasActive) {
+    if (recentKey === key || (recentKey != null && dropped.has(recentKey))) recentKey = null
+    const activeGone = wasActive || (activeKey != null && dropped.has(activeKey))
+    if (activeGone) {
       const next = tabs[tabs.length - 1]
       activeKey = next ? tabKey(next.hostId, next.path) : null
       if (next) {
@@ -721,6 +849,8 @@
 
   function editText(hostId: string, path: string, text: string): void {
     const key = tabKey(hostId, path)
+    const current = tabs.find((tab) => tabKey(tab.hostId, tab.path) === key)
+    if (!current || current.text === text) return
     saveNote = ''
     tabs = tabs.map((tab) => (tabKey(tab.hostId, tab.path) === key ? { ...tab, text, dirty: true } : tab))
   }
@@ -743,12 +873,13 @@
   }
 
   async function saveActive(): Promise<void> {
-    if (saving || !activeTab?.dirty || activeTab.writable === false) return
+    const tab = statusTab
+    if (saving || !tab?.dirty || tab.writable === false) return
     saving = true
     busy = true
     banner = ''
     try {
-      const inPlace = await saveTab(activeTab)
+      const inPlace = await saveTab(tab)
       saveNote = inPlace ? 'Saved in place' : ''
     } catch (err) {
       banner = message(err)
@@ -785,14 +916,16 @@
   }
 
   function closeActiveTab(): void {
-    if (activeTab) closeTab(activeTab.hostId, activeTab.path)
+    if (activeCompare) closeCompare(activeCompare.id)
+    else if (activeTab) closeTab(activeTab.hostId, activeTab.path)
   }
 
   function closeAllTabs(): void {
-    if (tabs.length === 0) return
+    if (tabs.length === 0 && compares.length === 0) return
     if (hasDirty() && !confirm('Discard unsaved edits and close all tabs?')) return
     for (const tab of tabs) setFileError(tab.hostId, tab.path, null)
     tabs = []
+    compares = []
     activeKey = null
     recentKey = null
     persistOpenFiles()
@@ -860,6 +993,7 @@
     else if (command === 'project:open') void openProject()
     else if (command === 'file:save') void saveActive()
     else if (command === 'file:save-all') void saveAll()
+    else if (command === 'file:compare') openCompare()
     else if (command === 'file:close') closeActiveTab()
     else if (command === 'file:close-all') closeAllTabs()
     else if (command === 'host:add') void beginAddHost()
@@ -1003,7 +1137,7 @@
           label="Save (Ctrl+S)"
           icon="save"
           accent
-          disabled={!activeTab?.dirty || activeTab.writable === false || busy}
+          disabled={!statusTab?.dirty || statusTab.writable === false || busy}
           onclick={() => void saveActive()}
         />
         <ToolButton
@@ -1012,6 +1146,8 @@
           disabled={!tabs.some((tab) => tab.dirty && tab.writable !== false) || busy}
           onclick={() => void saveAll()}
         />
+        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
+        <ToolButton label={compareLabel} icon="compare" disabled={!comparePair} onclick={openCompare} />
       </div>
       <div
         class="flex flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-line bg-ink px-2 pt-2"
@@ -1059,6 +1195,45 @@
             >×</button>
           </div>
         {/each}
+        {#each compares as compare (compare.id)}
+          {@const sourceHost = hosts.find((item) => item.id === compare.sourceHostId)}
+          {@const destHost = hosts.find((item) => item.id === compare.destHostId)}
+          {@const sourceDirty = tabs.some((tab) => tab.hostId === compare.sourceHostId && tab.path === compare.sourcePath && tab.dirty)}
+          {@const destDirty = tabs.some((tab) => tab.hostId === compare.destHostId && tab.path === compare.destPath && tab.dirty)}
+          {@const sourceError = fileErrors[tabKey(compare.sourceHostId, compare.sourcePath)] ?? ''}
+          {@const destError = fileErrors[tabKey(compare.destHostId, compare.destPath)] ?? ''}
+          {@const label = `${fileName(compare.sourcePath)} · ${fileName(compare.destPath)}`}
+          <div
+            class="flex max-w-72 shrink-0 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
+            compare.id
+              ? 'border-line border-t-accent bg-panel text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
+              : 'border-transparent text-slate-500 hover:text-slate-300'}"
+            role="listitem"
+            data-active-tab={activeKey === compare.id ? 'true' : undefined}
+          >
+            <button
+              class="min-w-0 flex-1 truncate text-left"
+              title={sourceHost && destHost
+                ? `${identity(sourceHost, compare.sourcePath)} → ${identity(destHost, compare.destPath)}`
+                : label}
+              onclick={() => activateCompare(compare.id)}
+            >
+              {label}
+            </button>
+            {#if sourceError || destError}
+              <span class="size-2.5 shrink-0 rounded-full bg-bad" title={[sourceError, destError].filter(Boolean).join('\n')} aria-label="error"></span>
+            {/if}
+            {#if sourceDirty || destDirty}
+              <span class="size-2.5 shrink-0 rounded-full bg-warn" title="Unsaved changes" aria-label="Unsaved changes"></span>
+            {/if}
+            <button
+              class="text-slate-400 hover:text-white"
+              data-close-tab
+              title="Close compare"
+              onclick={() => closeCompare(compare.id)}
+            >×</button>
+          </div>
+        {/each}
       </div>
       <div class="relative min-h-0 flex-1">
         {#each tabs as tab (tabKey(tab.hostId, tab.path))}
@@ -1077,7 +1252,44 @@
             />
           </div>
         {/each}
-        {#if !activeTab}
+        {#each compares as compare (compare.id)}
+          {@const source = tabs.find((tab) => tab.hostId === compare.sourceHostId && tab.path === compare.sourcePath)}
+          {@const dest = tabs.find((tab) => tab.hostId === compare.destHostId && tab.path === compare.destPath)}
+          {@const sourceHost = hosts.find((item) => item.id === compare.sourceHostId)}
+          {@const destHost = hosts.find((item) => item.id === compare.destHostId)}
+          <div class="absolute inset-0 {compare.id === activeKey ? 'z-10' : 'invisible pointer-events-none'}">
+            {#if source && dest}
+              <CompareTab
+                active={compare.id === activeKey}
+                focus={compare.focus}
+                sourcePath={source.path}
+                destPath={dest.path}
+                sourceText={source.text}
+                destText={dest.text}
+                sourceReadOnly={source.writable === false}
+                destReadOnly={dest.writable === false}
+                sourceAlias={sourceHost?.displayName ?? 'host'}
+                destAlias={destHost?.displayName ?? 'host'}
+                sourceIdentity={sourceHost ? identity(sourceHost, source.path) : source.path}
+                destIdentity={destHost ? identity(destHost, dest.path) : dest.path}
+                sourceDirty={source.dirty}
+                destDirty={dest.dirty}
+                onChange={(side, text) =>
+                  editText(
+                    side === 'source' ? source.hostId : dest.hostId,
+                    side === 'source' ? source.path : dest.path,
+                    text
+                  )}
+                onSave={() => void saveActive()}
+                onCursor={(line, column) => {
+                  if (compare.id === activeKey) cursor = { line, column }
+                }}
+                onFocus={(side) => focusCompareSide(compare.id, side)}
+              />
+            {/if}
+          </div>
+        {/each}
+        {#if !statusTab}
           <div class="flex h-full items-center justify-center text-sm text-slate-500">
             {project ? 'Open a file from a host.' : 'No project open.'}
           </div>
@@ -1085,30 +1297,28 @@
       </div>
       <footer class="flex min-w-0 items-center justify-between gap-3 border-t border-line bg-panel px-3 py-1 text-xs text-slate-300">
         <span class="min-w-0 flex-1 truncate">
-          {#if activeTab && selectedHost && activeTab.hostId === selectedHost.id}
-            {identity(selectedHost, activeTab.path)}
-          {:else if activeTab}
-            {@const host = hosts.find((item) => item.id === activeTab.hostId)}
-            {host ? identity(host, activeTab.path) : activeTab.path}
+          {#if statusTab}
+            {@const host = hosts.find((item) => item.id === statusTab.hostId)}
+            {host ? identity(host, statusTab.path) : statusTab.path}
           {:else if selectedHost}
             {selectedHost.displayName}
           {/if}
         </span>
         <span class="flex shrink-0 items-center gap-3">
-          {#if activeTab?.writable === false}
+          {#if statusTab?.writable === false}
             <span>read-only</span>
           {/if}
-          {#if activeTab}
+          {#if statusTab}
             <span>UTF-8</span>
-            <span>{activeTab.lineEnding}</span>
-            <span>{statusOf(activeTab.hostId)}</span>
+            <span>{statusTab.lineEnding}</span>
+            <span>{statusOf(statusTab.hostId)}</span>
           {:else if selectedHost}
             <span>{statusOf(selectedHost.id)}</span>
           {/if}
           {#if saveNote}
             <span>{saveNote}</span>
           {/if}
-          <span>{activeTab ? `${cursor.line}:${cursor.column}` : ''}</span>
+          <span>{statusTab ? `${cursor.line}:${cursor.column}` : ''}</span>
           <button class="shrink-0 font-mono text-slate-100 hover:text-white" title="Check for updates" onclick={() => void window.api.app.checkForUpdates()}>
             {appVersion ? `v${appVersion}` : ''}
           </button>

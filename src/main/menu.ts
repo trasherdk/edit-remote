@@ -24,6 +24,7 @@ export function installMenu(getWindow: () => BrowserWindow | null): void {
         { type: 'separator' },
         item('Save', 'file:save', 'CmdOrCtrl+S'),
         item('Save all', 'file:save-all', 'CmdOrCtrl+Shift+S'),
+        item('Compare', 'file:compare'),
         { type: 'separator' },
         item('Close tab', 'file:close', 'CmdOrCtrl+W'),
         item('Close all tabs', 'file:close-all'),
