@@ -136,3 +136,87 @@ body.tab-dragging * {
 .cm-editor .cm-cursor-secondary {
   border-left: 1.2px solid #e6edf3 !important;
 }
+
+.compare-panes {
+  --compare-gutter: 4.25rem;
+}
+
+.cm-mergeView {
+  height: 100%;
+  overflow: hidden !important;
+}
+
+.cm-mergeView .cm-mergeViewEditors,
+.cm-mergeView .cm-mergeViewEditor {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.cm-mergeView .cm-mergeViewEditor {
+  overflow: hidden;
+}
+
+.cm-mergeView .cm-mergeViewEditor > .cm-editor {
+  height: 100% !important;
+}
+
+.cm-mergeView .cm-mergeViewEditor > .cm-editor .cm-scroller {
+  height: 100% !important;
+  overflow: auto !important;
+}
+
+.cm-mergeView .cm-merge-revert {
+  position: relative;
+  width: var(--compare-gutter) !important;
+  flex: 0 0 var(--compare-gutter) !important;
+  overflow: hidden;
+}
+
+.cm-mergeView .cm-merge-revert .cm-compare-actions {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1px;
+  pointer-events: none;
+}
+
+.cm-mergeView .cm-merge-revert .cm-compare-actions button {
+  display: inline-flex !important;
+  width: 18px !important;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #c9d1d9;
+  line-height: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  position: static !important;
+}
+
+.cm-mergeView .cm-merge-revert .cm-compare-actions button:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+
+.cm-mergeView .cm-merge-revert .cm-compare-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.cm-editor.cm-merge-b .cm-changedLine {
+  background-color: color-mix(in srgb, var(--color-ok) 24%, transparent) !important;
+}
+
+.cm-editor.cm-merge-a .cm-changedLine {
+  background-color: color-mix(in srgb, var(--color-bad) 24%, transparent) !important;
+}
+
+.cm-mergeView .cm-mergeSpacer {
+  background: color-mix(in srgb, var(--color-line) 55%, transparent);
+}

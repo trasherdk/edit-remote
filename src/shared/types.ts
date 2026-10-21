@@ -94,6 +94,7 @@ export type MenuCommand =
   | 'project:open'
   | 'file:save'
   | 'file:save-all'
+  | 'file:compare'
   | 'file:close'
   | 'file:close-all'
   | 'host:add'
