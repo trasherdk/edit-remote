@@ -192,33 +192,38 @@ const body = [
   '- GitHub Actions will attach Windows (NSIS setup + portable) and Linux (AppImage + .deb) binaries.'
 ].join('\n')
 
-let pr = ''
-try {
-  pr = gh(['pr', 'list', '--base', 'master', '--head', 'develop', '--json', 'url', '--jq', '.[0].url'])
-} catch {
-  pr = ''
-}
-
-if (!pr || pr === 'null') {
-  pr = gh(['pr', 'create', '--base', 'master', '--head', 'develop', '--title', title, '--body', body])
-  console.log(`Opened ${pr}`)
+const masterTip = git(['rev-parse', 'origin/master'])
+if (masterTip === head) {
+  console.log(`develop and master are already ${head}. Skipping the pull request.`)
 } else {
-  console.log(`Using existing PR ${pr}`)
-}
-
-const notesFile = join(tmpdir(), `edit-remote-${tag}-merge.txt`)
-writeFileSync(notesFile, `${changes.trim()}\n`)
-try {
-  execFileSync(
-    'gh',
-    ['pr', 'merge', pr, '--merge', '--delete-branch=false', '--subject', `Release ${tag}`, '--body-file', notesFile],
-    { stdio: 'inherit' }
-  )
-} finally {
+  let pr = ''
   try {
-    unlinkSync(notesFile)
+    pr = gh(['pr', 'list', '--base', 'master', '--head', 'develop', '--json', 'url', '--jq', '.[0].url'])
   } catch {
-    // The temp file only carries the merge message.
+    pr = ''
+  }
+
+  if (!pr || pr === 'null') {
+    pr = gh(['pr', 'create', '--base', 'master', '--head', 'develop', '--title', title, '--body', body])
+    console.log(`Opened ${pr}`)
+  } else {
+    console.log(`Using existing PR ${pr}`)
+  }
+
+  const notesFile = join(tmpdir(), `edit-remote-${tag}-merge.txt`)
+  writeFileSync(notesFile, `${changes.trim()}\n`)
+  try {
+    execFileSync(
+      'gh',
+      ['pr', 'merge', pr, '--merge', '--delete-branch=false', '--subject', `Release ${tag}`, '--body-file', notesFile],
+      { stdio: 'inherit' }
+    )
+  } finally {
+    try {
+      unlinkSync(notesFile)
+    } catch {
+      // The temp file only carries the merge message.
+    }
   }
 }
 
@@ -244,7 +249,17 @@ if (tip !== finalMaster || tip !== finalDevelop) {
   fail(`develop and master are not the same after release (HEAD ${tip}, origin/master ${finalMaster}, origin/develop ${finalDevelop}).`)
 }
 
-gitRun(['tag', '-a', tag, tip, '-m', tag])
+let tagged = ''
+try {
+  tagged = git(['rev-parse', `${tag}^{}`])
+} catch {
+  tagged = ''
+}
+if (!tagged) {
+  gitRun(['tag', '-a', tag, tip, '-m', tag])
+} else if (tagged !== tip) {
+  fail(`Local tag ${tag} points at ${tagged}, not ${tip}.`)
+}
 gitRun(['push', 'origin', tag])
 
 console.log(`Tagged ${tag} at ${tip}`)
