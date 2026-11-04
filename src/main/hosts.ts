@@ -10,6 +10,25 @@ export type StoredHost = Omit<HostProfile, 'hasPassphrase'>
 let catalog: StoredHost[] = []
 let loadedDir: string | null = null
 
+function byName(a: StoredHost, b: StoredHost): number {
+  return a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })
+}
+
+function sortCatalog(): void {
+  catalog.sort(byName)
+}
+
+function copyName(base: string): string {
+  const taken = new Set(catalog.map((host) => host.displayName.trim().toLowerCase()))
+  let name = `${base} copy`
+  let n = 2
+  while (taken.has(name.toLowerCase())) {
+    name = `${base} copy ${n}`
+    n += 1
+  }
+  return name
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -55,12 +74,14 @@ export async function readyHosts(): Promise<void> {
   } catch {
     catalog = []
   }
+  sortCatalog()
   loadedDir = dir
 }
 
 async function writeCatalog(): Promise<void> {
   const path = await catalogPath(true)
   if (!path) throw new Error('Choose a folder for settings before saving a host.')
+  sortCatalog()
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
   await writeFile(tmp, JSON.stringify({ hosts: catalog }, null, 2), 'utf8')
@@ -111,9 +132,6 @@ export async function saveHost(input: HostInput): Promise<HostProfile[]> {
   const existing = catalog.find((host) => host.id === id)
   if (input.id && !existing) throw new Error('That host is not in settings')
 
-  if (input.clearPassphrase) await clearPassphrase(id)
-  else if (input.passphrase) await savePassphrase(id, input.passphrase)
-
   const next: StoredHost = {
     id,
     displayName: input.displayName.trim() || hostname,
@@ -125,6 +143,23 @@ export async function saveHost(input: HostInput): Promise<HostProfile[]> {
     lastDirectory: existing?.lastDirectory || input.defaultDirectory.trim(),
     hostKeyFingerprint: existing?.hostKeyFingerprint ?? null
   }
+  const sameConnection = catalog.find(
+    (host) =>
+      host.id !== id &&
+      host.hostname.trim().toLowerCase() === hostname.toLowerCase() &&
+      host.port === port &&
+      host.username.trim() === username
+  )
+  if (sameConnection) {
+    throw new Error(
+      `A host for ${sameConnection.username}@${sameConnection.hostname}:${sameConnection.port} is already in the list.`
+    )
+  }
+  const sameName = catalog.find((host) => host.id !== id && host.displayName.trim().toLowerCase() === next.displayName.toLowerCase())
+  if (sameName) throw new Error(`A host named ${sameName.displayName} is already in the list.`)
+
+  if (input.clearPassphrase) await clearPassphrase(id)
+  else if (input.passphrase) await savePassphrase(id, input.passphrase)
   catalog = existing ? catalog.map((host) => (host.id === id ? next : host)) : [...catalog, next]
   await writeCatalog()
   return listHosts()
@@ -136,7 +171,7 @@ export async function duplicateHost(id: string): Promise<{ hosts: HostProfile[];
   const copy: StoredHost = {
     ...host,
     id: randomUUID(),
-    displayName: `${host.displayName} copy`
+    displayName: copyName(host.displayName)
   }
   await copyPassphrase(host.id, copy.id)
   catalog = [...catalog, copy]
