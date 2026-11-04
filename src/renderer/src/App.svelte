@@ -1017,6 +1017,58 @@
     </div>
   {/if}
 
+  <div class="flex h-8 w-full shrink-0 items-center gap-1 border-b border-line bg-panel px-1">
+    <div class="tool-group">
+      <ToolButton label="New project" icon="new-project" onclick={() => void newProject()} />
+      <ToolButton label="Open project" icon="open-project" onclick={() => void openProject()} />
+    </div>
+    <div class="tool-group">
+      <ToolButton label="Add host" icon="add-host" onclick={() => void beginAddHost()} />
+      <ToolButton label="Edit host" icon="edit" disabled={!listHost} onclick={beginEditHost} />
+      <ToolButton label="Duplicate host" icon="duplicate" disabled={!listHost || busy} onclick={() => void duplicateSelected()} />
+      <ToolButton label="Remove host" icon="remove-host" disabled={!listHost} onclick={() => void removeSelectedHost()} />
+    </div>
+    <div class="tool-group">
+      <ToolButton
+        label="Connect"
+        icon="connect"
+        disabled={!listHost || statusOf(listHost.id) === 'connecting' || statusOf(listHost.id) === 'connected'}
+        onclick={() => void connectSelected()}
+      />
+      <ToolButton
+        label="Disconnect"
+        icon="disconnect"
+        disabled={!listHost || statusOf(listHost.id) !== 'connected'}
+        onclick={() => void disconnectSelected()}
+      />
+      <ToolButton label="Open file" icon="open-file" disabled={!project || !listHost || busy} onclick={() => void openBrowse()} />
+      <ToolButton label="Remove file" icon="remove-file" disabled={selection?.kind !== 'file'} onclick={() => void forgetSelectedFile()} />
+      <ToolButton label="Close all tabs" icon="close-all" disabled={tabs.length === 0} onclick={closeAllTabs} />
+    </div>
+    <div class="tool-group">
+      <ToolButton
+        label="Save (Ctrl+S)"
+        icon="save"
+        accent
+        disabled={!statusTab?.dirty || statusTab.writable === false || busy}
+        onclick={() => void saveActive()}
+      />
+      <ToolButton
+        label="Save all (Ctrl+Shift+S)"
+        icon="save-all"
+        disabled={!tabs.some((tab) => tab.dirty && tab.writable !== false) || busy}
+        onclick={() => void saveAll()}
+      />
+    </div>
+    <div class="tool-group">
+      <ToolButton label={compareLabel} icon="compare" disabled={!comparePair} onclick={openCompare} />
+    </div>
+    <div class="min-w-0 flex-1"></div>
+    <div class="tool-group">
+      <ToolButton label="Settings" icon="settings" onclick={() => void openSettings()} />
+    </div>
+  </div>
+
   <div class="flex min-h-0 flex-1">
     {#snippet hostRow(host: HostProfile, foldable: boolean)}
       {@const folded = foldable && hostFolded(host.id)}
@@ -1056,33 +1108,6 @@
     {/snippet}
 
     <aside class="flex w-80 shrink-0 flex-col border-r border-line bg-panel">
-      <div class="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-1">
-        <ToolButton label="New project" icon="new-project" onclick={() => void newProject()} />
-        <ToolButton label="Open project" icon="open-project" onclick={() => void openProject()} />
-        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
-        <ToolButton label="Add host" icon="add-host" onclick={() => void beginAddHost()} />
-        <ToolButton label="Edit host" icon="edit" disabled={!listHost} onclick={beginEditHost} />
-        <ToolButton label="Duplicate host" icon="duplicate" disabled={!listHost || busy} onclick={() => void duplicateSelected()} />
-        <ToolButton
-          label="Connect"
-          icon="connect"
-          disabled={!listHost || statusOf(listHost.id) === 'connecting' || statusOf(listHost.id) === 'connected'}
-          onclick={() => void connectSelected()}
-        />
-        <ToolButton
-          label="Disconnect"
-          icon="disconnect"
-          disabled={!listHost || statusOf(listHost.id) !== 'connected'}
-          onclick={() => void disconnectSelected()}
-        />
-        <ToolButton label="Open file" icon="open-file" disabled={!project || !listHost || busy} onclick={() => void openBrowse()} />
-        <ToolButton label="Close all tabs" icon="close-all" disabled={tabs.length === 0} onclick={closeAllTabs} />
-        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
-        <ToolButton label="Remove host" icon="remove-host" disabled={!listHost} onclick={() => void removeSelectedHost()} />
-        <ToolButton label="Remove file" icon="remove-file" disabled={selection?.kind !== 'file'} onclick={() => void forgetSelectedFile()} />
-        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
-        <ToolButton label="Settings" icon="settings" onclick={() => void openSettings()} />
-      </div>
       <div class="flex border-b border-line">
         <button
           class="flex-1 px-2 py-1.5 text-sm {side === 'hosts' ? 'bg-ink text-accent' : 'text-slate-300 hover:bg-ink'}"
@@ -1132,23 +1157,6 @@
     </aside>
 
     <main class="flex min-w-0 flex-1 flex-col">
-      <div class="flex h-9 shrink-0 items-center gap-0.5 border-b border-line bg-panel px-1">
-        <ToolButton
-          label="Save (Ctrl+S)"
-          icon="save"
-          accent
-          disabled={!statusTab?.dirty || statusTab.writable === false || busy}
-          onclick={() => void saveActive()}
-        />
-        <ToolButton
-          label="Save all (Ctrl+Shift+S)"
-          icon="save-all"
-          disabled={!tabs.some((tab) => tab.dirty && tab.writable !== false) || busy}
-          onclick={() => void saveAll()}
-        />
-        <span class="mx-0.5 h-4 w-px shrink-0 bg-line"></span>
-        <ToolButton label={compareLabel} icon="compare" disabled={!comparePair} onclick={openCompare} />
-      </div>
       <div
         class="flex flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-line bg-ink px-2 pt-2"
         role="list"
@@ -1161,7 +1169,7 @@
           <div
             class="flex max-w-56 shrink-0 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
             key
-              ? 'border-line border-t-accent bg-panel text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
+              ? 'border-line border-t-accent bg-editor text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
               : 'border-transparent text-slate-500 hover:text-slate-300'} {dragKey === key ? 'opacity-40' : ''}"
             role="listitem"
             data-active-tab={activeKey === key ? 'true' : undefined}
@@ -1206,7 +1214,7 @@
           <div
             class="flex max-w-72 shrink-0 items-center gap-2 rounded-t border border-b-0 px-2 py-1 text-sm {activeKey ===
             compare.id
-              ? 'border-line border-t-accent bg-panel text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
+              ? 'border-line border-t-accent bg-editor text-white shadow-[inset_0_2px_0_0_var(--color-accent)]'
               : 'border-transparent text-slate-500 hover:text-slate-300'}"
             role="listitem"
             data-active-tab={activeKey === compare.id ? 'true' : undefined}
