@@ -18,12 +18,15 @@
     busy: boolean
     error: string
     onNavigate: (path: string) => void
-    onOpen: (path: string) => void
+    onOpen: (paths: string[]) => void
     onClose: () => void
   } = $props()
 
   let draft = $state(untrack(() => shownDirectory(path)))
   let selected = $state<DirEntry | null>(null)
+  /** File paths chosen for Open. Arrow keys and a plain click replace this with one file. */
+  let picked = $state<string[]>([])
+  let anchor = $state<string | null>(null)
   let listEl = $state<HTMLDivElement | null>(null)
   let pathInput = $state<HTMLInputElement | null>(null)
   let owned = false
@@ -94,6 +97,8 @@
     const wanted = normalize(dir)
     if (wanted !== normalize(path)) {
       selected = null
+      picked = []
+      anchor = null
       if (wanted !== pendingDir) {
         pendingDir = wanted
         onNavigate(dir)
@@ -125,6 +130,8 @@
     const listed = path
     if (listed === lastListed) return
     lastListed = listed
+    picked = []
+    anchor = null
     if (!owned) {
       draft = shownDirectory(listed)
       selected = null
@@ -176,7 +183,60 @@
   function showEntry(entry: DirEntry): void {
     selected = entry
     draft = entry.path
+    picked = entry.kind === 'file' ? [entry.path] : []
+    anchor = entry.path
     void tick().then(focusField)
+  }
+
+  function chosenFiles(): string[] {
+    const marked = new Set(picked)
+    const fromList = entries.filter((entry) => entry.kind === 'file' && marked.has(entry.path)).map((entry) => entry.path)
+    if (fromList.length > 0) return fromList
+    if (selected?.kind === 'file') return [selected.path]
+    return []
+  }
+
+  function toggleFile(entry: DirEntry): void {
+    if (entry.kind !== 'file') return
+    selected = entry
+    draft = entry.path
+    anchor = entry.path
+    picked = picked.includes(entry.path) ? picked.filter((path) => path !== entry.path) : [...picked, entry.path]
+    void tick().then(focusField)
+  }
+
+  function rangeFiles(entry: DirEntry): void {
+    if (entry.kind !== 'file') return
+    const paths = rows.map((row) => row.path)
+    const from = anchor ? paths.indexOf(anchor) : paths.indexOf(entry.path)
+    const to = paths.indexOf(entry.path)
+    if (from < 0 || to < 0) {
+      showEntry(entry)
+      return
+    }
+    const start = Math.min(from, to)
+    const end = Math.max(from, to)
+    picked = rows.slice(start, end + 1).filter((row) => row.kind === 'file').map((row) => row.path)
+    selected = entry
+    draft = entry.path
+    void tick().then(focusField)
+  }
+
+  function onRowClick(entry: DirEntry, event: MouseEvent): void {
+    if (entry.kind === 'dir') {
+      if (event.ctrlKey || event.metaKey || event.shiftKey) return
+      enterDir(entry.path)
+      return
+    }
+    if (event.shiftKey) {
+      rangeFiles(entry)
+      return
+    }
+    if (event.ctrlKey || event.metaKey) {
+      toggleFile(entry)
+      return
+    }
+    showEntry(entry)
   }
 
   function enterDir(directory: string): void {
@@ -200,7 +260,7 @@
 
   function accept(entry: DirEntry): void {
     if (entry.kind === 'file') {
-      onOpen(entry.path)
+      onOpen([entry.path])
       return
     }
     enterDir(entry.path)
@@ -222,6 +282,12 @@
       return
     }
     if (event.key !== 'Enter' || !inField || !selected) return
+    const files = chosenFiles()
+    if (files.length > 1) {
+      event.preventDefault()
+      onOpen(files)
+      return
+    }
     if (selected.kind === 'dir') {
       event.preventDefault()
       enterDir(selected.path)
@@ -296,13 +362,14 @@
           {#each rows as entry (entry.path)}
             <li>
               <button
-                class="flex w-full min-w-0 items-center gap-2 px-2 text-left leading-5 hover:bg-hover {selected?.path === entry.path
+                class="flex w-full min-w-0 items-center gap-2 px-2 text-left leading-5 hover:bg-hover {picked.includes(entry.path) ||
+                (picked.length === 0 && selected?.path === entry.path)
                   ? 'bg-tab-active'
                   : ''}"
                 type="button"
                 data-path={entry.path}
-                ondblclick={() => (entry.kind === 'dir' ? enterDir(entry.path) : onOpen(entry.path))}
-                onclick={() => (entry.kind === 'dir' ? enterDir(entry.path) : showEntry(entry))}
+                ondblclick={() => (entry.kind === 'dir' ? enterDir(entry.path) : onOpen([entry.path]))}
+                onclick={(event) => onRowClick(entry, event)}
               >
                 <span class="w-6 shrink-0 text-xs font-normal leading-5 text-slate-500">{entry.kind === 'dir' ? 'dir' : ''}</span>
                 <span class="min-w-0 truncate text-sm font-normal leading-5">{entry.name}</span>
@@ -319,10 +386,10 @@
       <button
         class="btn btn-accent"
         type="button"
-        disabled={!selected || selected.kind !== 'file' || busy}
-        onclick={() => selected && onOpen(selected.path)}
+        disabled={chosenFiles().length === 0 || busy}
+        onclick={() => onOpen(chosenFiles())}
       >
-        Open
+        {chosenFiles().length > 1 ? `Open ${chosenFiles().length}` : 'Open'}
       </button>
     </div>
   </div>
