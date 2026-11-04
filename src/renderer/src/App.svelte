@@ -740,7 +740,23 @@
     showTab(tab.hostId, tab.path)
   }
 
-  async function openRemote(hostId: string, path: string, rememberOpen = true, focus = true): Promise<void> {
+  async function openFiles(hostId: string, paths: string[]): Promise<void> {
+    const unique = [...new Set(paths)]
+    const failed: string[] = []
+    let lastOpened: string | null = null
+    for (const path of unique) {
+      const opened = await openRemote(hostId, path, true, false)
+      if (opened) lastOpened = path
+      else failed.push(fileName(path))
+    }
+    if (lastOpened) {
+      focusFile(hostId, lastOpened)
+      side = 'files'
+    }
+    if (failed.length > 0 && !browse) banner = `Could not open ${failed.join(', ')}.`
+  }
+
+  async function openRemote(hostId: string, path: string, rememberOpen = true, focus = true): Promise<boolean> {
     const key = tabKey(hostId, path)
     const existing = tabs.find((tab) => tabKey(tab.hostId, tab.path) === key)
     if (existing) {
@@ -750,7 +766,7 @@
         revealFile(hostId, path)
         persistOpenFiles()
       }
-      return
+      return true
     }
     busy = true
     banner = ''
@@ -780,11 +796,13 @@
         revealFile(hostId, path)
         persistOpenFiles()
       }
+      return true
     } catch (err) {
       const text = message(err)
       setFileError(hostId, path, text)
       if (browse) browse = { ...browse, error: text }
       else banner = text
+      return false
     } finally {
       busy = false
     }
@@ -1373,7 +1391,7 @@
     {busy}
     error={current.error}
     onNavigate={(path) => void navigate(path)}
-    onOpen={(path) => void openRemote(current.hostId, path)}
+    onOpen={(paths) => void openFiles(current.hostId, paths)}
     onClose={() => (browse = null)}
   />
 {/if}

@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -13,12 +13,44 @@ function fail(message) {
   process.exit(1)
 }
 
+// This machine's SSH handshake to github.com is refused before the key is
+// signed, and url.insteadOf rewrites https://github.com/ back to that SSH
+// remote. Talk to GitHub over HTTPS with the gh credential the script already
+// requires. An empty credential.helper drops any helper that would pop a prompt.
+let githubAuthArgs
+function authArgs() {
+  if (githubAuthArgs) return githubAuthArgs
+  let owner = 'trasherdk'
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim()
+    const match = /^git@github\.com:([^/]+)\//.exec(url)
+    if (match) owner = match[1]
+  } catch {
+    // origin is git@github.com:<owner>/... when the remote can be read
+  }
+  githubAuthArgs = [
+    '-c', 'url.https://github.com/.insteadOf=https://github.com/',
+    '-c', `url.https://github.com/${owner}/.insteadOf=git@github.com:${owner}/`,
+    '-c', 'credential.helper=',
+    '-c', 'credential.https://github.com.helper=!gh auth git-credential'
+  ]
+  return githubAuthArgs
+}
+
+function gitEnv(opts = {}) {
+  const { env, ...rest } = opts
+  return {
+    ...rest,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env }
+  }
+}
+
 function git(args, opts = {}) {
-  return execFileSync('git', args, { encoding: 'utf8', ...opts }).trim()
+  return execFileSync('git', [...authArgs(), ...args], { encoding: 'utf8', ...gitEnv(opts) }).trim()
 }
 
 function gitRun(args) {
-  execFileSync('git', args, { stdio: 'inherit' })
+  execFileSync('git', [...authArgs(), ...args], { stdio: 'inherit', ...gitEnv() })
 }
 
 function gh(args, opts = {}) {
@@ -114,7 +146,7 @@ if (dirty) fail('Working tree is not clean. Commit or stash first.')
 try {
   gh(['auth', 'status'])
 } catch {
-  fail('gh is not authenticated. Run: gh auth login -p ssh')
+  fail('gh is not authenticated. Run: gh auth login')
 }
 
 gitRun(['fetch', 'origin', '--prune', '--tags'])
@@ -142,7 +174,7 @@ if (version !== pkg().version) {
 }
 
 const tag = `v${version}`
-const existing = execSync(`git ls-remote --tags origin ${tag}`, { encoding: 'utf8' }).trim()
+const existing = git(['ls-remote', '--tags', 'origin', tag])
 if (existing) fail(`Tag ${tag} already exists on origin.`)
 
 if (!isAncestor('origin/master', 'HEAD')) {
